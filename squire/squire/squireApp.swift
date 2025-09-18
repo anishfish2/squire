@@ -13,59 +13,60 @@ struct squireApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
-        WindowGroup {
-            ContentView()
-                .background(Color.black)
-                .cornerRadius(8)
-                .shadow(radius: 8)
-                .fixedSize() // auto-size to fit OCR text
+        // We don’t use WindowGroup for the overlay anymore.
+        // The AppDelegate creates the floating panel manually.
+        Settings {
+            EmptyView() // no default settings window
         }
-        .windowStyle(.hiddenTitleBar)
-        .windowResizability(.contentSize) // resize = content-driven
     }
 }
+
+// MARK: - Non-activating Overlay Panel
+
+class OverlayPanel: NSPanel {
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+}
+
+// MARK: - AppDelegate sets up overlay
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        DispatchQueue.main.async {
-            if let window = NSApp.windows.first {
-                self.window = window
-                self.setupOverlayWindow(window)
-            }
-        }
+        setupOverlayWindow()
     }
 
-    private func setupOverlayWindow(_ window: NSWindow) {
-        window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = true
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.hasShadow = true
+    private func setupOverlayWindow() {
+        guard let screen = NSScreen.main else { return }
 
-        // Borderless style (no traffic lights)
-        window.styleMask = [.borderless]
+        let barWidth: CGFloat = 120
+        let barFrame = NSRect(
+            x: screen.visibleFrame.maxX - barWidth,
+            y: screen.visibleFrame.minY,
+            width: barWidth,
+            height: screen.visibleFrame.height
+        )
 
-        // Allow dragging by clicking anywhere in the background
-        window.isMovableByWindowBackground = true
-        
-        // Float above other windows
-        window.level = .floating
-        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        let panel = OverlayPanel(
+            contentRect: barFrame,
+            styleMask: [.nonactivatingPanel, .hudWindow],
+            backing: .buffered,
+            defer: false
+        )
 
-        if let screen = NSScreen.main {
-            let boxWidth: CGFloat = 200
-            let boxHeight: CGFloat = 120
-            let startFrame = NSRect(
-                x: screen.frame.midX - boxWidth/2,
-                y: screen.frame.midY - boxHeight/2,
-                width: boxWidth,
-                height: boxHeight
-            )
-            window.setFrame(startFrame, display: true)
-        }
+        panel.isFloatingPanel = true
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hidesOnDeactivate = false
+        panel.hasShadow = true
+
+        panel.contentView = NSHostingView(rootView: ContentView())
+
+        // Important: don’t make it key
+        panel.orderFrontRegardless()
+        self.window = panel
     }
-
-
 }

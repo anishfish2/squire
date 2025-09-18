@@ -2,8 +2,36 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var ocr = OCRManager() // SwiftUI owns the lifecycle
-    
+    @StateObject private var tracker = ActiveAppTracker()
+
     var body: some View {
+        VStack(spacing: 12) {
+                    Text("Active App:")
+                        .font(.headline)
+                        .foregroundColor(.white)
+
+                    Text(tracker.currentAppName)
+                        .font(.title2)
+                        .bold()
+                        .foregroundColor(.green)
+                        .padding(.horizontal)
+
+                    if !tracker.currentWindowTitle.isEmpty {
+                        Text("Window:")
+                            .font(.caption)
+                            .foregroundColor(.gray)
+
+                        Text(tracker.currentWindowTitle)
+                            .font(.caption)
+                            .foregroundColor(.yellow)
+                            .padding(.horizontal)
+                            .multilineTextAlignment(.center)
+                    }
+                }
+                .frame(width: 200, height: 160)
+                .background(Color.black)
+                .cornerRadius(10)
+            
         VStack(alignment: .leading, spacing: 8) {
             // OCR trigger button
             Button("Run OCR on Screen") {

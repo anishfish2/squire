@@ -98,7 +98,7 @@ class OCRManager: NSObject, ObservableObject {
             }
         }
         
-        request.recognitionLevel = .fast  // change to .accurate if you prefer quality over speed
+        request.recognitionLevel = .accurate  // change to .accurate if you prefer quality over speed
         request.usesLanguageCorrection = true
         
         processingQueue.async {
