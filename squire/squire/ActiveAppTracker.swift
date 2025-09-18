@@ -8,53 +8,63 @@ class ActiveAppTracker: ObservableObject {
     private let myBundleId = Bundle.main.bundleIdentifier
     private var eventMonitor: Any?
     private var localEventMonitor: Any?
+    private var pendingWorkItem: DispatchWorkItem?
+    private var ocr: OCRManager
 
-    init() {
+    init(ocr : OCRManager) {
+        self.ocr = ocr
         updateCurrentApp()
         startTracking()
         startGlobalEventMonitoring()
     }
+    
 
     private func updateCurrentApp() {
-        // Use a more reliable method to get the actual frontmost application
-        let workspace = NSWorkspace.shared
+         let workspace = NSWorkspace.shared
+         var frontmostApp: NSRunningApplication?
 
-        // Get the frontmost application using multiple methods for accuracy
-        var frontmostApp: NSRunningApplication?
+         if let app = workspace.frontmostApplication,
+            app.bundleIdentifier != myBundleId,
+            app.activationPolicy == .regular {
+             frontmostApp = app
+         }
 
-        // Method 1: Check the frontmost application
-        if let app = workspace.frontmostApplication,
-           app.bundleIdentifier != myBundleId,
-           app.activationPolicy == .regular {
-            frontmostApp = app
-        }
+         if frontmostApp == nil {
+             let sortedApps = workspace.runningApplications
+                 .filter { $0.bundleIdentifier != myBundleId && $0.activationPolicy == .regular }
+                 .sorted { $0.processIdentifier > $1.processIdentifier }
+             frontmostApp = sortedApps.first { !$0.isHidden }
+         }
 
-        // Method 2: If that fails, check running apps by activation policy
-        if frontmostApp == nil {
-            let sortedApps = workspace.runningApplications
-                .filter { $0.bundleIdentifier != myBundleId && $0.activationPolicy == .regular }
-                .sorted { $0.processIdentifier > $1.processIdentifier } // More recent PIDs first
-
-            frontmostApp = sortedApps.first { !$0.isHidden }
-        }
-
-        if let app = frontmostApp {
-            let newName = app.localizedName ?? "Unknown App"
-            if newName != currentAppName {
-                currentAppName = newName
-                print("DEBUG: App switched to: \(currentAppName)")
+         if let app = frontmostApp {
+             let newName = app.localizedName ?? "Unknown App"
+             if newName != currentAppName {
+                 currentAppName = newName
+                 print("DEBUG: App switched to: \(currentAppName)")
+                 // schedule OCR after 0.5s
+                 scheduleOCR(for: newName)
+             }
+             updateWindowTitle(for: app)
+         } else {
+             if currentAppName != "No active app" {
+                 currentAppName = "No active app"
+                 currentWindowTitle = ""
+                 print("DEBUG: No active app found")
+             }
+         }
+     }
+    
+    private func scheduleOCR(for appName: String) {
+            pendingWorkItem?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                guard let self = self else { return }
+                if self.currentAppName == appName {
+                    Task { await self.ocr.captureAndRecognize() }
+                }
             }
-
-            // Get window title using Accessibility API
-            updateWindowTitle(for: app)
-        } else {
-            if currentAppName != "No active app" {
-                currentAppName = "No active app"
-                currentWindowTitle = ""
-                print("DEBUG: No active app found")
-            }
+            pendingWorkItem = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
         }
-    }
 
     private func updateWindowTitle(for app: NSRunningApplication) {
         // Check if we have accessibility permissions first, and prompt if not
