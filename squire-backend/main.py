@@ -1,141 +1,137 @@
-from fastapi import FastAPI, HTTPException
+"""
+Squire Backend API - FastAPI Implementation
+OCR tracking, AI suggestions, and knowledge graph
+"""
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import JSONResponse
+import uvicorn
 import os
-from dotenv import load_dotenv
-from supabase import create_client, Client
-from openai import OpenAI
-from pydantic import BaseModel
-from typing import Optional
+from contextlib import asynccontextmanager
 
-load_dotenv()
+# Import routers
+from app.routers import (
+    profiles,
+    sessions,
+    suggestions,
+    events,
+    knowledge,
+    analytics,
+    management
+)
+from app.core.config import settings
+from app.core.database import supabase
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    print("🚀 Starting Squire Backend API...")
+    yield
+    # Shutdown
+    print("🛑 Shutting down Squire Backend API...")
+
+
+# Create FastAPI app
 app = FastAPI(
     title="Squire Backend API",
-    description="Backend API for the Squire application",
-    version="1.0.0"
+    description="Complete API for OCR tracking, AI suggestions, and knowledge graph",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    lifespan=lifespan
 )
 
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-supabase_url = os.getenv("SUPABASE_URL")
-supabase_key = os.getenv("SUPABASE_KEY")
-openai_api_key = os.getenv("OPENAI_API_KEY")
+# Trusted host middleware
+if settings.ALLOWED_HOSTS:
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=settings.ALLOWED_HOSTS
+    )
 
-if not all([supabase_url, supabase_key, openai_api_key]):
-    raise ValueError("Missing required environment variables")
+# Include routers
+app.include_router(profiles.router, prefix="/api/profiles", tags=["profiles"])
+app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
+app.include_router(suggestions.router, prefix="/api/suggestions", tags=["suggestions"])
+app.include_router(events.router, prefix="/api/events", tags=["events"])
+app.include_router(knowledge.router, prefix="/api/knowledge", tags=["knowledge"])
+app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"])
+app.include_router(management.router, prefix="/api/management", tags=["management"])
 
-supabase: Client = create_client(supabase_url, supabase_key)
-openai_client = OpenAI(api_key=openai_api_key)
-
-class TextAnalysisRequest(BaseModel):
-    text: str
-    analysis_type: Optional[str] = "general"
-
-class ChatRequest(BaseModel):
-    message: str
-    context: Optional[str] = None
 
 @app.get("/")
 async def root():
-    return {"message": "Welcome to Squire Backend API", "status": "healthy"}
-
-@app.get("/health")
-async def health_check():
-    try:
-        # Test Supabase connection
-        supabase.table("_dummy").select("*").limit(1).execute()
-        supabase_status = "connected"
-    except:
-        supabase_status = "disconnected"
-
+    """API root endpoint"""
     return {
-        "status": "healthy",
-        "services": {
-            "supabase": supabase_status,
-            "openai": "configured" if openai_api_key else "not_configured"
+        "message": "Squire Backend API",
+        "version": "1.0.0",
+        "documentation": "/docs",
+        "routes": {
+            "profiles": "/api/profiles",
+            "sessions": "/api/sessions",
+            "suggestions": "/api/suggestions",
+            "events": "/api/events",
+            "knowledge": "/api/knowledge",
+            "analytics": "/api/analytics",
+            "management": "/api/management"
         }
     }
 
-@app.post("/analyze-text")
-async def analyze_text(request: TextAnalysisRequest):
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
     try:
-        response = openai_client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": f"Analyze the following text for {request.analysis_type} insights. Provide a concise analysis."},
-                {"role": "user", "content": request.text}
-            ],
-            max_tokens=500
-        )
+        # Test database connection
+        response = await supabase.rpc("database_health_check").execute()
+        db_status = "healthy" if response.data else "unhealthy"
+    except Exception:
+        db_status = "unhealthy"
 
-        analysis = response.choices[0].message.content
+    return {
+        "status": "healthy",
+        "database": db_status,
+        "timestamp": "2024-01-01T00:00:00Z",  # This would be current timestamp
+        "version": "1.0.0"
+    }
 
-        # Store analysis in Supabase (optional - you'll need to create the table)
-        # result = supabase.table("text_analyses").insert({
-        #     "original_text": request.text,
-        #     "analysis": analysis,
-        #     "analysis_type": request.analysis_type
-        # }).execute()
 
-        return {
-            "analysis": analysis,
-            "analysis_type": request.analysis_type,
-            "status": "success"
+@app.exception_handler(Exception)
+async def general_exception_handler(request, exc):
+    """Global exception handler"""
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "Internal server error",
+            "message": str(exc) if settings.DEBUG else "Something went wrong"
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+    )
 
-@app.post("/chat")
-async def chat_with_ai(request: ChatRequest):
-    try:
-        messages = [
-            {"role": "system", "content": "You are a helpful assistant for the Squire application."}
-        ]
 
-        if request.context:
-            messages.append({"role": "system", "content": f"Context: {request.context}"})
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request, exc):
+    """HTTP exception handler"""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": exc.detail}
+    )
 
-        messages.append({"role": "user", "content": request.message})
-
-        response = openai_client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=messages,
-            max_tokens=1000
-        )
-
-        reply = response.choices[0].message.content
-
-        return {
-            "reply": reply,
-            "status": "success"
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
-
-@app.get("/data/sample")
-async def get_sample_data():
-    try:
-        # This is a sample route - replace with your actual table name
-        # result = supabase.table("your_table").select("*").limit(5).execute()
-        # return {"data": result.data, "status": "success"}
-
-        return {
-            "message": "Sample data endpoint - configure with your Supabase table",
-            "example_data": [
-                {"id": 1, "name": "Sample Item 1"},
-                {"id": 2, "name": "Sample Item 2"}
-            ],
-            "status": "success"
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Data retrieval failed: {str(e)}")
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(
+        "main:app",
+        host=settings.HOST,
+        port=settings.PORT,
+        reload=settings.DEBUG,
+        log_level="info"
+    )
