@@ -1,0 +1,83 @@
+{
+  "name": "squire-electron",
+  "version": "1.0.0",
+  "description": "OCR overlay app with app focus monitoring",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --enable-logging",
+    "build": "electron-builder",
+    "build-and-run": "npm run build && open dist/mac-arm64/Squire.app",
+    "dist": "electron-builder --publish=never"
+  },
+  "keywords": [
+    "ocr",
+    "overlay",
+    "screen-capture"
+  ],
+  "author": "Anish Karthik",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^27.0.0",
+    "electron-builder": "^24.6.4"
+  },
+  "dependencies": {
+    "@paymoapp/active-window": "^2.1.2",
+    "active-win": "^8.0.0",
+    "node-mac-permissions": "^2.5.0",
+    "screenshot-desktop": "^1.12.7",
+    "tesseract.js": "^5.0.2"
+  },
+  "build": {
+    "appId": "com.anishkarthik.squire",
+    "productName": "Squire",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "renderer.html",
+      "renderer.js",
+      "styles.css",
+      "ocr-manager.js",
+      "app-tracker.js",
+      "activity-tracker.js",
+      "ai-assistant.js",
+      "node_modules/**/*"
+    ],
+    "asarUnpack": [
+      "node_modules/node-mac-permissions/**/*",
+      "node_modules/active-win/**/*",
+      "node_modules/@paymoapp/active-window/**/*",
+      "node_modules/screenshot-desktop/**/*",
+      "**/*.node"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
+      "entitlements": "assets/entitlements.mac.plist",
+      "entitlementsInherit": "assets/entitlements.mac.plist",
+      "identity": "Anish Karthik (357A76Q8TB)",
+      "gatekeeperAssess": false,
+      "extendInfo": {
+        "NSCameraUsageDescription": "This app uses camera for OCR functionality",
+        "NSMicrophoneUsageDescription": "This app may use microphone for accessibility features"
+      },
+      "extraFiles": [
+        {
+          "from": "node_modules",
+          "to": "Resources/node_modules",
+          "filter": ["**/*.node"]
+        }
+      ]
+    },
+    "dmg": {
+      "title": "Squire Installer",
+      "background": null,
+      "window": {
+        "width": 540,
+        "height": 380
+      }
+    }
+  }
+}

@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Squire Overlay</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="overlay-container">
+    <!-- Debug panel (top-left corner) -->
+    <div id="debug-panel" class="debug-panel">
+      <div class="debug-header">Squire Debug</div>
+      <div class="debug-item">
+        <span class="debug-label">Current App:</span>
+        <span id="debug-app" class="debug-value">-</span>
+      </div>
+      <div class="debug-item">
+        <span class="debug-label">Window:</span>
+        <span id="debug-window" class="debug-value">-</span>
+      </div>
+      <div class="debug-item">
+        <span class="debug-label">OCR Lines:</span>
+        <span id="debug-ocr-lines" class="debug-value">-</span>
+      </div>
+      <div class="debug-item">
+        <span class="debug-label">Backend Call:</span>
+        <span id="debug-backend-status" class="debug-value">-</span>
+      </div>
+      <div class="debug-item">
+        <span class="debug-label">Suggestions:</span>
+        <span id="debug-suggestions" class="debug-value">-</span>
+      </div>
+    </div>
+
+    <!-- Collapsed state: black dot -->
+    <div id="dot" class="dot">
+    </div>
+
+    <!-- Expanded state: text box (initially hidden) -->
+    <div id="text-box" class="text-box hidden">
+      <div class="text-content">
+        <div id="ocr-results">
+          <!-- OCR text will be populated here -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
