@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Squire Suggestions</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background: transparent;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    #overlay-container {
+      -webkit-app-region: drag; /* make whole overlay draggable */
+    }
+
+    /* prevent drag on interactive controls */
+    button, a, input, textarea {
+      -webkit-app-region: no-drag;
+    }
+  </style>
+</head>
+<body>
+  <div id="overlay-container">
+    <!-- Collapsed state: black dot -->
+    <div id="dot" class="dot" style="-webkit-app-region: no-drag;">
+    </div>
+
+    <!-- Expanded state: text box (initially hidden) -->
+    <div id="text-box" class="text-box hidden" style="-webkit-app-region: no-drag;">
+      <div class="text-content">
+        <div id="ocr-results">
+          <!-- OCR text will be populated here -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="suggestions.js"></script>
+</body>
+</html>
+

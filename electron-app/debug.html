@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Squire Debug</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background: transparent;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      overflow: hidden;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    .debug-panel {
+      background: rgba(0, 0, 0, 0.8);
+      color: white;
+      padding: 15px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-family: 'SF Mono', Monaco, monospace;
+      min-width: 250px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      backdrop-filter: blur(10px);
+
+      /* draggable area */
+      -webkit-app-region: drag;
+    }
+
+    .debug-header {
+      font-weight: bold;
+      font-size: 14px;
+      margin-bottom: 10px;
+      color: #00ff88;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+      padding-bottom: 5px;
+      cursor: move;
+    }
+
+    .debug-item {
+      margin-bottom: 6px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+
+      /* prevent dragging on values/labels */
+      -webkit-app-region: no-drag;
+    }
+
+    .debug-label {
+      color: #aaa;
+      font-weight: 500;
+      min-width: 100px;
+    }
+
+    .debug-value {
+      color: #fff;
+      font-weight: 600;
+      text-align: right;
+      max-width: 140px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .debug-value.status-waiting {
+      color: #ffaa00;
+    }
+
+    .debug-value.status-success {
+      color: #00ff88;
+    }
+
+    .debug-value.status-error {
+      color: #ff4444;
+    }
+  </style>
+</head>
+<body>
+  <div class="debug-panel">
+    <div class="debug-header">Squire Debug</div>
+    <div class="debug-item">
+      <span class="debug-label">Current App:</span>
+      <span id="debug-app" class="debug-value">-</span>
+    </div>
+    <div class="debug-item">
+      <span class="debug-label">Window:</span>
+      <span id="debug-window" class="debug-value">-</span>
+    </div>
+    <div class="debug-item">
+      <span class="debug-label">OCR Lines:</span>
+      <span id="debug-ocr-lines" class="debug-value">-</span>
+    </div>
+    <div class="debug-item">
+      <span class="debug-label">Backend Call:</span>
+      <span id="debug-backend-status" class="debug-value">-</span>
+    </div>
+    <div class="debug-item">
+      <span class="debug-label">Suggestions:</span>
+      <span id="debug-suggestions" class="debug-value">-</span>
+    </div>
+  </div>
+
+  <script src="debug.js"></script>
+</body>
+</html>
+

@@ -489,3 +489,16 @@ body {
   opacity: 0.9;
 }
 
+/* draggable area */
+#debug-panel, #suggestions-panel {
+  -webkit-app-region: drag;
+  padding: 10px;
+  background: rgba(0,0,0,0.6);
+  border-radius: 8px;
+}
+
+/* disable drag on controls */
+button, a, input, textarea {
+  -webkit-app-region: no-drag;
+}
+
