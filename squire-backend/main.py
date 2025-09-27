@@ -9,17 +9,13 @@ from fastapi.responses import JSONResponse
 import uvicorn
 import os
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+
+# Load environment variables explicitly
+load_dotenv()
 
 # Import routers
-from app.routers import (
-    profiles,
-    sessions,
-    suggestions,
-    events,
-    knowledge,
-    analytics,
-    management
-)
+from app.routers import ai
 from app.core.config import settings
 from app.core.database import supabase
 
@@ -60,13 +56,7 @@ if settings.ALLOWED_HOSTS:
     )
 
 # Include routers
-app.include_router(profiles.router, prefix="/api/profiles", tags=["profiles"])
-app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
-app.include_router(suggestions.router, prefix="/api/suggestions", tags=["suggestions"])
-app.include_router(events.router, prefix="/api/events", tags=["events"])
-app.include_router(knowledge.router, prefix="/api/knowledge", tags=["knowledge"])
-app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"])
-app.include_router(management.router, prefix="/api/management", tags=["management"])
+app.include_router(ai.router, prefix="/api/ai", tags=["ai"])
 
 
 @app.get("/")
@@ -77,13 +67,9 @@ async def root():
         "version": "1.0.0",
         "documentation": "/docs",
         "routes": {
-            "profiles": "/api/profiles",
-            "sessions": "/api/sessions",
-            "suggestions": "/api/suggestions",
-            "events": "/api/events",
-            "knowledge": "/api/knowledge",
-            "analytics": "/api/analytics",
-            "management": "/api/management"
+            "ai_suggestions": "/api/ai/suggestions",
+            "ai_context": "/api/ai/context",
+            "ai_health": "/api/ai/health"
         }
     }
 
@@ -101,7 +87,7 @@ async def health_check():
     return {
         "status": "healthy",
         "database": db_status,
-        "timestamp": "2024-01-01T00:00:00Z",  # This would be current timestamp
+        "timestamp": "2024-01-01T00:00:00Z",
         "version": "1.0.0"
     }
 

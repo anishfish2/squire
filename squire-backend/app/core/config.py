@@ -14,7 +14,10 @@ class Settings(BaseSettings):
 
     # Supabase settings
     SUPABASE_URL: str
-    SUPABASE_ANON_KEY: str
+    SUPABASE_KEY: str
+
+    # OpenAI settings
+    OPENAI_API_KEY: str
 
     # Security settings
     ALLOWED_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000"]

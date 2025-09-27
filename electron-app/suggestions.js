@@ -54,26 +54,48 @@ function showTextBox() {
   }
 }
 
+
 function updateOCRText(textLines, aiSuggestions = [], appName = '') {
   if (!ocrResults) return;
-
   ocrResults.innerHTML = '';
 
   if (aiSuggestions && aiSuggestions.length > 0) {
     aiSuggestions.forEach((suggestion, index) => {
       const suggestionDiv = document.createElement('div');
-      suggestionDiv.className = 'plain-suggestion';
+      suggestionDiv.className = 'suggestion-card';
       suggestionDiv.onclick = () => {
         console.log('Clicked suggestion:', suggestion.title);
       };
 
       const needsGuide = suggestion.content.requires_detailed_guide;
       const guideButton = needsGuide
-        ? `<button class="guide-button" onclick="showDetailedGuide(this, ${JSON.stringify(suggestion).replace(/"/g, '&quot;')})">📋 Step-by-step guide</button>`
+        ? `<button class="guide-button" onclick="showDetailedGuide(this, ${JSON.stringify(
+            suggestion
+          ).replace(/"/g, '&quot;')})">📋 Step-by-step guide</button>`
         : '';
 
+      // Build expanded suggestion UI
       suggestionDiv.innerHTML = `
-        <div class="suggestion-text">${suggestion.content.description}</div>
+        <h3 class="suggestion-title">${suggestion.title}</h3>
+        <p class="suggestion-description">${suggestion.content.description}</p>
+
+        <div class="suggestion-meta">
+          <p><strong>Expected Benefit:</strong> ${suggestion.content.expected_benefit || '—'}</p>
+          <p><strong>Difficulty:</strong> ${suggestion.content.difficulty || '—'}</p>
+          <p><strong>Time Investment:</strong> ${suggestion.content.time_investment || '—'}</p>
+          <p><strong>Platforms:</strong> ${(suggestion.content.platforms || []).join(', ') || '—'}</p>
+          <p><strong>Tools Needed:</strong> ${(suggestion.content.tools_needed || []).join(', ') || '—'}</p>
+        </div>
+
+        <div class="suggestion-steps">
+          <strong>Action Steps:</strong>
+          <ul>
+            ${(suggestion.content.action_steps || [])
+              .map(step => `<li>${step}</li>`)
+              .join('')}
+          </ul>
+        </div>
+
         ${guideButton}
         <div class="detailed-guide hidden" id="guide-${index}"></div>
       `;
@@ -81,6 +103,7 @@ function updateOCRText(textLines, aiSuggestions = [], appName = '') {
     });
   }
 }
+
 
 function startIdleTimer() {
   clearTimeout(idleTimer);

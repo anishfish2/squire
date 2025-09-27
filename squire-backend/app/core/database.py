@@ -7,7 +7,7 @@ from app.core.config import settings
 # Initialize Supabase client
 supabase: Client = create_client(
     settings.SUPABASE_URL,
-    settings.SUPABASE_ANON_KEY
+    settings.SUPABASE_KEY
 )
 
 
@@ -19,22 +19,6 @@ async def get_supabase() -> Client:
 class DatabaseError(Exception):
     """Custom database error"""
     pass
-
-
-async def execute_rpc(function_name: str, params: dict = None):
-    """Execute a Supabase RPC function with error handling"""
-    try:
-        if params:
-            response = await supabase.rpc(function_name, params).execute()
-        else:
-            response = await supabase.rpc(function_name).execute()
-
-        if response.data is None:
-            raise DatabaseError(f"RPC function {function_name} returned no data")
-
-        return response.data
-    except Exception as e:
-        raise DatabaseError(f"Database error in {function_name}: {str(e)}")
 
 
 async def execute_query(table: str, operation: str, **kwargs):
@@ -72,11 +56,11 @@ async def execute_query(table: str, operation: str, **kwargs):
         # Execute query
         if operation in ["select", "insert", "update", "delete"]:
             if kwargs.get("single", False):
-                response = await query.single().execute()
+                response = query.single().execute()
             else:
-                response = await query.execute()
+                response = query.execute()
         else:
-            response = await query.execute()
+            response = query.execute()
 
         return response.data
     except Exception as e:

@@ -15,31 +15,76 @@
     }
 
     #overlay-container {
-      -webkit-app-region: drag; /* make whole overlay draggable */
+      -webkit-app-region: drag;
     }
 
-    /* prevent drag on interactive controls */
     button, a, input, textarea {
       -webkit-app-region: no-drag;
+    }
+
+    .suggestion-card {
+      background: rgba(0,0,0,0.85);
+      color: #fff;
+      padding: 12px;
+      margin-bottom: 10px;
+      border-radius: 8px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      border: 1px solid rgba(255,255,255,0.15);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+      max-width: 350px;
+    }
+
+    .suggestion-title {
+      margin: 0 0 6px 0;
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .suggestion-description {
+      font-size: 13px;
+      margin: 4px 0 8px 0;
+    }
+
+    .suggestion-meta p {
+      font-size: 12px;
+      margin: 2px 0;
+    }
+
+    .suggestion-steps {
+      margin-top: 8px;
+      font-size: 13px;
+    }
+
+    .suggestion-steps ul {
+      margin: 4px 0 0 16px;
+      padding: 0;
+    }
+
+    .guide-button {
+      margin-top: 10px;
+      padding: 6px 10px;
+      font-size: 12px;
+      background: #007aff;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    .guide-button:hover {
+      background: #005bb5;
     }
   </style>
 </head>
 <body>
   <div id="overlay-container">
-    <!-- Collapsed state: black dot -->
-    <div id="dot" class="dot" style="-webkit-app-region: no-drag;">
-    </div>
-
-    <!-- Expanded state: text box (initially hidden) -->
+    <div id="dot" class="dot" style="-webkit-app-region: no-drag;"></div>
     <div id="text-box" class="text-box hidden" style="-webkit-app-region: no-drag;">
       <div class="text-content">
-        <div id="ocr-results">
-          <!-- OCR text will be populated here -->
-        </div>
+        <div id="ocr-results"></div>
       </div>
     </div>
   </div>
-
   <script src="suggestions.js"></script>
 </body>
 </html>
