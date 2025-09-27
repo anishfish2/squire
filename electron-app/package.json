@@ -26,6 +26,7 @@
     "active-win": "^8.0.0",
     "node-mac-permissions": "^2.5.0",
     "screenshot-desktop": "^1.12.7",
+    "sharp": "^0.34.4",
     "tesseract.js": "^5.0.2"
   },
   "build": {
@@ -71,7 +72,9 @@
         {
           "from": "node_modules",
           "to": "Resources/node_modules",
-          "filter": ["**/*.node"]
+          "filter": [
+            "**/*.node"
+          ]
         }
       ]
     },
