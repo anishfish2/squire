@@ -32,9 +32,9 @@ class OCRManager {
       const imgBuffer = await screenshot({ format: 'png' });
       console.log('Screenshot captured, sending to backend...');
 
-      // Show overlay again
+      // Show overlay again without focusing
       if (wasVisible && this.overlayWindow) {
-        this.overlayWindow.show();
+        this.overlayWindow.showInactive();
       }
 
       // Send to backend for OCR processing
@@ -51,9 +51,9 @@ class OCRManager {
       return response.text_lines || [];
 
     } catch (error) {
-      // Only restore overlay if it was visible before we hid it
+      // Only restore overlay if it was visible before we hid it (without focusing)
       if (wasVisible && this.overlayWindow && !this.overlayWindow.isVisible()) {
-        this.overlayWindow.show();
+        this.overlayWindow.showInactive();
       }
 
       if (error.message && error.message.includes('screen recording')) {

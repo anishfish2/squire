@@ -7,6 +7,7 @@ const ActiveAppTracker = require("./app-tracker"); // ✅ now uses @paymoapp/act
 const ComprehensiveActivityTracker = require("./activity-tracker");
 const AIAssistant = require("./ai-assistant");
 
+let mainWindow;
 let debugWindow;
 let suggestionsWindow;
 let ocrManager;
@@ -14,6 +15,8 @@ let appTracker;
 let activityTracker;
 let aiAssistant;
 let recentActivityData = null;
+let skipNextOCR = false; // For user-initiated focus handling
+let appSwitchDebouncer = null; // For debounced OCR processing
 
 // ----- Helper Functions -----
 function sendToDebug(channel, data) {
@@ -28,7 +31,74 @@ function sendToSuggestions(channel, data) {
   }
 }
 
+// ----- App Switch Debouncer -----
+class AppSwitchDebouncer {
+  constructor(delay = 500) {
+    this.delay = delay;
+    this.pendingApp = null;
+    this.timeout = null;
+    this.processCallback = null;
+  }
+
+  setProcessCallback(callback) {
+    this.processCallback = callback;
+  }
+
+  scheduleOCR(appInfo) {
+    // Cancel previous pending OCR
+    if (this.timeout) {
+      clearTimeout(this.timeout);
+    }
+
+    // Store the latest app
+    this.pendingApp = appInfo;
+
+    console.log(`⏱️ Debouncing app switch to: ${appInfo.appName} (${this.delay}ms)`);
+
+    // Schedule OCR after delay
+    this.timeout = setTimeout(() => {
+      if (this.pendingApp && this.processCallback) {
+        console.log(`🎯 Processing settled app: ${this.pendingApp.appName}`);
+        this.processCallback(this.pendingApp);
+      }
+      this.pendingApp = null;
+      this.timeout = null;
+    }, this.delay);
+  }
+
+  cancel() {
+    if (this.timeout) {
+      clearTimeout(this.timeout);
+      this.timeout = null;
+      this.pendingApp = null;
+    }
+  }
+}
+
 // ----- Window Creation -----
+function createMainWindow() {
+  mainWindow = new BrowserWindow({
+    width: 400,
+    height: 300,
+    show: false,           // Start hidden
+    skipTaskbar: false,    // DO show in taskbar/dock
+    focusable: true,       // CAN be focused when user clicks
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+    },
+  });
+
+  // Load a simple status page
+  mainWindow.loadFile(path.join(__dirname, "debug.html"));
+
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
+
+  return mainWindow;
+}
+
 function createDebugWindow() {
   debugWindow = new BrowserWindow({
     width: 300,
@@ -41,6 +111,7 @@ function createDebugWindow() {
     resizable: true,
     movable: true,
     skipTaskbar: true,
+    focusable: false,      // Can't steal focus
     visibleOnAllWorkspaces: true,
     fullscreenable: false,
     webPreferences: {
@@ -75,6 +146,14 @@ function createDebugWindow() {
     debugWindow = null;
   });
 
+  // User-initiated focus handling for debug window
+  debugWindow.webContents.on('did-finish-load', () => {
+    debugWindow.webContents.executeJavaScript(`
+      document.addEventListener('click', () => {
+        require('electron').ipcRenderer.send('overlay-clicked', 'debug');
+      });
+    `);
+  });
 
 
 
@@ -95,6 +174,7 @@ function createSuggestionsWindow() {
     resizable: true,
     movable: true,
     skipTaskbar: true,
+    focusable: false,      // Can't steal focus
     visibleOnAllWorkspaces: true,
     fullscreenable: false,
     webPreferences: {
@@ -128,6 +208,15 @@ function createSuggestionsWindow() {
     suggestionsWindow = null;
   });
 
+  // User-initiated focus handling for suggestions window
+  suggestionsWindow.webContents.on('did-finish-load', () => {
+    suggestionsWindow.webContents.executeJavaScript(`
+      document.addEventListener('click', () => {
+        require('electron').ipcRenderer.send('overlay-clicked', 'suggestions');
+      });
+    `);
+  });
+
 
 
 
@@ -136,9 +225,67 @@ function createSuggestionsWindow() {
 }
 
 // ----- OCR / AI / Tracking -----
+// Process OCR results and generate AI suggestions (called by debouncer)
+async function processAppOCR(appInfo) {
+  try {
+    sendToDebug("debug-update", {
+      appName: appInfo.appName,
+      windowTitle: appInfo.windowTitle,
+      ocrLines: Array.isArray(appInfo.ocrResults) ? appInfo.ocrResults.length : 0,
+      backendStatus: appInfo.ocrResults ? "Processing OCR…" : "Waiting for OCR…",
+      statusType: "waiting",
+    });
+
+    if (Array.isArray(appInfo.ocrResults) && appInfo.ocrResults.length > 0) {
+      sendToDebug("debug-update", {
+        backendStatus: "Calling backend…",
+        statusType: "waiting",
+      });
+
+      const enrichedContext = {
+        ...appInfo,
+        recentActivity: recentActivityData,
+        timestamp: Date.now(),
+      };
+
+      try {
+        const suggestions = await aiAssistant.generateSuggestions(
+          enrichedContext,
+          appInfo.ocrResults
+        );
+
+        sendToDebug("debug-update", {
+          backendStatus: "Success",
+          statusType: "success",
+          suggestions: Array.isArray(suggestions) ? suggestions.length : 0,
+        });
+
+        sendToSuggestions("ocr-results", {
+          appName: appInfo.appName,
+          windowTitle: appInfo.windowTitle,
+          textLines: appInfo.ocrResults,
+          aiSuggestions: suggestions || [],
+        });
+      } catch (err) {
+        console.error("❌ AI suggestion error:", err);
+        sendToDebug("debug-update", {
+          backendStatus: `Error: ${err?.message || "AI failure"}`,
+          statusType: "error",
+        });
+      }
+    }
+  } catch (err) {
+    console.error("Error processing app OCR:", err);
+  }
+}
+
 function setupPipelines() {
   ocrManager = new OCRManager(suggestionsWindow);
   aiAssistant = new AIAssistant();
+
+  // Initialize debouncer
+  appSwitchDebouncer = new AppSwitchDebouncer(500);
+  appSwitchDebouncer.setProcessCallback(processAppOCR);
 
   activityTracker = new ComprehensiveActivityTracker((activityData) => {
     try {
@@ -154,52 +301,35 @@ function setupPipelines() {
 
   appTracker = new ActiveAppTracker(ocrManager, async (appInfo) => {
     try {
-      sendToDebug("debug-update", {
-        appName: appInfo.appName,
-        windowTitle: appInfo.windowTitle,
-        ocrLines: Array.isArray(appInfo.ocrResults) ? appInfo.ocrResults.length : 0,
-        backendStatus: appInfo.ocrResults ? "Processing OCR…" : "Waiting for OCR…",
-        statusType: "waiting",
-      });
+      // Prevent self-detection feedback loops (immediate check)
+      const SQUIRE_APP_IDENTIFIERS = [
+        'Squire',
+        'squire-electron',
+        'Electron Helper',
+        'Electron',
+        'claude-code'
+      ];
 
-      if (Array.isArray(appInfo.ocrResults) && appInfo.ocrResults.length > 0) {
-        sendToDebug("debug-update", {
-          backendStatus: "Calling backend…",
-          statusType: "waiting",
-        });
+      const isSquireApp = SQUIRE_APP_IDENTIFIERS.some(identifier =>
+        appInfo.appName?.includes(identifier) ||
+        appInfo.execName?.includes(identifier) ||
+        appInfo.windowTitle?.includes('Squire')
+      );
 
-        const enrichedContext = {
-          ...appInfo,
-          recentActivity: recentActivityData,
-          timestamp: Date.now(),
-        };
-
-        try {
-          const suggestions = await aiAssistant.generateSuggestions(
-            enrichedContext,
-            appInfo.ocrResults
-          );
-
-          sendToDebug("debug-update", {
-            backendStatus: "Success",
-            statusType: "success",
-            suggestions: Array.isArray(suggestions) ? suggestions.length : 0,
-          });
-
-          sendToSuggestions("ocr-results", {
-            appName: appInfo.appName,
-            windowTitle: appInfo.windowTitle,
-            textLines: appInfo.ocrResults,
-            aiSuggestions: suggestions || [],
-          });
-        } catch (err) {
-          console.error("❌ AI suggestion error:", err);
-          sendToDebug("debug-update", {
-            backendStatus: `Error: ${err?.message || "AI failure"}`,
-            statusType: "error",
-          });
+      if (isSquireApp) {
+        // Check if this is user-initiated focus
+        if (skipNextOCR) {
+          console.log('🚫 Skipping OCR due to user-initiated focus of Squire');
+          skipNextOCR = false; // Reset for next time
+          return;
         }
+        console.log('🚫 Ignoring self-focus, staying with previous app:', appInfo.appName);
+        return; // Skip processing our own app
       }
+
+      // Schedule debounced OCR processing for valid apps
+      appSwitchDebouncer.scheduleOCR(appInfo);
+
     } catch (err) {
       console.error("Error in appTracker callback:", err);
     }
@@ -235,12 +365,14 @@ function setupPipelines() {
 
 // ----- App Event Handlers -----
 app.whenReady().then(() => {
+  createMainWindow();
   createDebugWindow();
   createSuggestionsWindow();
   setupPipelines();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
+      createMainWindow();
       createDebugWindow();
       createSuggestionsWindow();
     }
@@ -273,5 +405,19 @@ ipcMain.on("suggestions-set-ignore-mouse-events", (event, ignore, options) => {
   if (suggestionsWindow && !suggestionsWindow.isDestroyed()) {
     suggestionsWindow.setIgnoreMouseEvents(ignore, options);
   }
+});
+
+// Handle overlay clicks - user wants to focus the app
+ipcMain.on("overlay-clicked", (event, overlayType) => {
+  console.log(`🖱️ User clicked ${overlayType} overlay - focusing main window`);
+
+  // Show and focus the main window
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show();
+    mainWindow.focus();
+  }
+
+  // Skip the next OCR when Squire comes into focus
+  skipNextOCR = true;
 });
 
