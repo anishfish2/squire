@@ -79,13 +79,13 @@ class PaddleOCRService:
                 text_lines.extend(res['rec_texts'])  # Also handle pure dict case
 
 
-        if text_lines:
-            print("\n=== OCR Extracted Text ===")
-            for idx, line in enumerate(text_lines, start=1):
-                print(f"{idx:02d}. {line}")
-            print("==========================\n")
-        else:
-            print("No text detected.")
+        # if text_lines:
+        #     print("\n=== OCR Extracted Text ===")
+        #     for idx, line in enumerate(text_lines, start=1):
+        #         print(f"{idx:02d}. {line}")
+        #     print("==========================\n")
+        # else:
+        #     print("No text detected.")
 
         return text_lines
 

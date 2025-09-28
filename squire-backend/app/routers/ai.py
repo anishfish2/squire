@@ -1,7 +1,7 @@
 """
 AI Service routes for OpenAI integration
 """
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import openai
@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 import asyncio
 from app.core.database import get_supabase, execute_query, DatabaseError
 from app.services.ocr_service import PaddleOCRService
+from app.services.ocr_job_manager import OCRJobManager, JobPriority
 from app.models.schemas import (
     AIContextRequest,
     AIContextResponse,
@@ -31,6 +32,18 @@ router = APIRouter()
 
 # Initialize OpenAI client
 openai_client = None
+
+# Initialize OCR Job Manager
+ocr_job_manager = None
+
+async def get_ocr_job_manager():
+    """Get or initialize the OCR job manager"""
+    global ocr_job_manager
+    if ocr_job_manager is None:
+        ocr_job_manager = OCRJobManager(max_workers=4)
+        await ocr_job_manager.start()
+        print("🚀 OCR Job Manager initialized")
+    return ocr_job_manager
 
 def get_openai_client():
     global openai_client
@@ -882,7 +895,7 @@ async def update_knowledge_graph(context_request: AIContextRequest, ai_request: 
                 operation="update",
                 data={
                     "content": updated_content,
-                    "weight": min(existing_node.get("weight", 1.0) + 0.1, 5.0)  # Cap at 5.0
+                    "weight": min(existing_node.get("weight", 1.0) + 0.1, 5.0)
                 },
                 filters={"id": existing_node["id"]}
             )
@@ -1571,17 +1584,162 @@ async def test_suggestion_similarity():
 
 
 @router.post("/ocr")
-async def process_ocr(file: UploadFile = File(...)):
-    """Process image with PaddleOCR"""
+async def process_ocr(
+    file: UploadFile = File(...),
+    app_name: str = "Unknown",
+    window_title: str = "",
+    bundle_id: str = "",
+    priority: str = "normal"
+):
+    """Queue OCR processing job"""
     try:
         image_data = await file.read()
-        ocr_service = PaddleOCRService()
-        
-        text_lines = await asyncio.to_thread(ocr_service.process_image, image_data)
-        print_text_lines(text_lines)
+        job_manager = await get_ocr_job_manager()
 
-        # return {"text_lines": text_lines}
+        # Parse priority
+        job_priority = JobPriority.NORMAL
+        if priority.lower() == "high":
+            job_priority = JobPriority.HIGH
+        elif priority.lower() == "low":
+            job_priority = JobPriority.LOW
+
+        # Create app context
+        app_context = {
+            "app_name": app_name,
+            "window_title": window_title,
+            "bundle_id": bundle_id,
+            "interaction_context": "manual_upload"
+        }
+
+        # Queue the job
+        job_id = await job_manager.queue_ocr_job(
+            image_data=image_data,
+            app_context=app_context,
+            priority=job_priority
+        )
+
+        print(f"📋 Queued OCR job {job_id}")
+
+        return {
+            "status": "queued",
+            "job_id": job_id,
+            "message": "OCR job queued for processing"
+        }
+
     except Exception as e:
+        print(f"❌ OCR queue error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/ocr/job/{job_id}")
+async def get_job_status(job_id: str):
+    """Get the status of a specific OCR job"""
+    try:
+        job_manager = await get_ocr_job_manager()
+        job_status = await job_manager.get_job_status(job_id)
+
+        if not job_status:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        return {
+            "job_id": job_id,
+            "status": job_status.get("job_status"),
+            "created_at": job_status.get("created_at"),
+            "started_at": job_status.get("started_at"),
+            "completed_at": job_status.get("completed_at"),
+            "app_context": {
+                "app_name": job_status.get("app_name"),
+                "window_title": job_status.get("window_title")
+            },
+            "text_lines": job_status.get("ocr_text", []),
+            "error_message": job_status.get("error_message")
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error getting job status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/ocr/queue/stats")
+async def get_queue_stats():
+    """Get current queue statistics"""
+    try:
+        job_manager = await get_ocr_job_manager()
+        stats = await job_manager.get_queue_stats()
+
+        return {
+            "queue_stats": stats,
+            "timestamp": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        print(f"❌ Error getting queue stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/ocr/queue/context")
+async def queue_ocr_with_context(
+    file: UploadFile = File(...),
+    app_name: str = Form("Unknown"),
+    window_title: str = Form(""),
+    bundle_id: str = Form(""),
+    user_id: str = Form(""),
+    session_context: str = Form("{}"),
+    priority: str = Form("normal")
+):
+    """Queue OCR job with full application context for intelligent processing"""
+
+    print("user_id" + user_id)
+    try:
+        image_data = await file.read()
+        job_manager = await get_ocr_job_manager()
+
+        # Parse session context
+        import json
+        try:
+            context_data = json.loads(session_context)
+        except json.JSONDecodeError:
+            context_data = {}
+
+        # Parse priority
+        job_priority = JobPriority.NORMAL
+        if priority.lower() == "high":
+            job_priority = JobPriority.HIGH
+        elif priority.lower() == "low":
+            job_priority = JobPriority.LOW
+
+        # Create enhanced app context
+        app_context = {
+            "app_name": app_name,
+            "window_title": window_title,
+            "bundle_id": bundle_id,
+            "user_id": user_id,
+            "interaction_context": "app_switch",
+            "session_context": context_data,
+            "timestamp": datetime.now().isoformat()
+        }
+
+        # Queue the job
+        job_id = await job_manager.queue_ocr_job(
+            image_data=image_data,
+            app_context=app_context,
+            priority=job_priority
+        )
+
+        print(f"📋 Queued contextual OCR job {job_id} for {app_name}")
+
+        return {
+            "status": "queued",
+            "job_id": job_id,
+            "app_name": app_name,
+            "priority": priority,
+            "message": "OCR job queued with context for intelligent processing"
+        }
+
+    except Exception as e:
+        print(f"❌ Contextual OCR queue error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

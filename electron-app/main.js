@@ -18,6 +18,8 @@ let recentActivityData = null;
 let skipNextOCR = false; // For user-initiated focus handling
 let appSwitchDebouncer = null; // For debounced OCR processing
 
+let currentUserId = "550e8400-e29b-41d4-a716-446655440000";
+
 // ----- Helper Functions -----
 function sendToDebug(channel, data) {
   if (debugWindow && !debugWindow.isDestroyed()) {
@@ -231,48 +233,71 @@ async function processAppOCR(appInfo) {
     sendToDebug("debug-update", {
       appName: appInfo.appName,
       windowTitle: appInfo.windowTitle,
-      ocrLines: Array.isArray(appInfo.ocrResults) ? appInfo.ocrResults.length : 0,
-      backendStatus: appInfo.ocrResults ? "Processing OCR…" : "Waiting for OCR…",
+      ocrLines: 0,
+      backendStatus: "Queuing OCR job…",
       statusType: "waiting",
     });
 
-    if (Array.isArray(appInfo.ocrResults) && appInfo.ocrResults.length > 0) {
+    // Process OCR with job queue system
+    try {
+      const ocrResults = await ocrManager.captureAndRecognize({
+        appName: appInfo.appName,
+        windowTitle: appInfo.windowTitle,
+        bundleId: appInfo.bundleId || appInfo.execName
+      }, currentUserId);
+
       sendToDebug("debug-update", {
-        backendStatus: "Calling backend…",
+        ocrLines: Array.isArray(ocrResults) ? ocrResults.length : 0,
+        backendStatus: "OCR completed, generating suggestions…",
         statusType: "waiting",
       });
 
-      const enrichedContext = {
-        ...appInfo,
-        recentActivity: recentActivityData,
-        timestamp: Date.now(),
-      };
+      if (Array.isArray(ocrResults) && ocrResults.length > 0) {
+        const enrichedContext = {
+          ...appInfo,
+          userId: currentUserId,
+          ocrResults,
+          recentActivity: recentActivityData,
+          timestamp: Date.now(),
+        };
 
-      try {
-        const suggestions = await aiAssistant.generateSuggestions(
-          enrichedContext,
-          appInfo.ocrResults
-        );
+        try {
+          const suggestions = await aiAssistant.generateSuggestions(
+            enrichedContext,
+            ocrResults
+          );
 
+          sendToDebug("debug-update", {
+            backendStatus: "Success",
+            statusType: "success",
+            suggestions: Array.isArray(suggestions) ? suggestions.length : 0,
+          });
+
+          sendToSuggestions("ocr-results", {
+            appName: appInfo.appName,
+            windowTitle: appInfo.windowTitle,
+            textLines: ocrResults,
+            aiSuggestions: suggestions || [],
+          });
+        } catch (err) {
+          console.error("❌ AI suggestion error:", err);
+          sendToDebug("debug-update", {
+            backendStatus: `Error: ${err?.message || "AI failure"}`,
+            statusType: "error",
+          });
+        }
+      } else {
         sendToDebug("debug-update", {
-          backendStatus: "Success",
-          statusType: "success",
-          suggestions: Array.isArray(suggestions) ? suggestions.length : 0,
-        });
-
-        sendToSuggestions("ocr-results", {
-          appName: appInfo.appName,
-          windowTitle: appInfo.windowTitle,
-          textLines: appInfo.ocrResults,
-          aiSuggestions: suggestions || [],
-        });
-      } catch (err) {
-        console.error("❌ AI suggestion error:", err);
-        sendToDebug("debug-update", {
-          backendStatus: `Error: ${err?.message || "AI failure"}`,
-          statusType: "error",
+          backendStatus: "No text detected",
+          statusType: "waiting",
         });
       }
+    } catch (ocrErr) {
+      console.error("❌ OCR processing error:", ocrErr);
+      sendToDebug("debug-update", {
+        backendStatus: `OCR Error: ${ocrErr?.message || "OCR failure"}`,
+        statusType: "error",
+      });
     }
   } catch (err) {
     console.error("Error processing app OCR:", err);
@@ -305,9 +330,7 @@ function setupPipelines() {
       const SQUIRE_APP_IDENTIFIERS = [
         'Squire',
         'squire-electron',
-        'Electron Helper',
-        'Electron',
-        'claude-code'
+        'squire',
       ];
 
       const isSquireApp = SQUIRE_APP_IDENTIFIERS.some(identifier =>

@@ -8,7 +8,7 @@ import os
 
 class Settings(BaseSettings):
     # Server settings
-    HOST: str = "0.0.0.0"
+    HOST: str = "127.0.0.1"
     PORT: int = 8000
     DEBUG: bool = True
 

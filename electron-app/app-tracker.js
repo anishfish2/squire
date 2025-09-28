@@ -81,32 +81,32 @@ class ActiveAppTracker {
       this.onAppChange(payload);
     }
 
-    this._scheduleOCR();
+    // this._scheduleOCR();
   }
 
-  _scheduleOCR() {
-    if (this.pendingOCR) clearTimeout(this.pendingOCR);
-
-    this.pendingOCR = setTimeout(async () => {
-      if (!this.ocrManager) return;
-      console.log('📸 Running OCR after app change…');
-
-      try {
-        const ocrResults = await this.ocrManager.captureAndRecognize();
-        if (this.onAppChange && this.currentWindow) {
-          this.onAppChange({
-            appName: this.currentWindow.application,
-            windowTitle: this.currentWindow.title,
-            ocrResults
-          });
-        }
-      } catch (err) {
-        console.error('❌ OCR error:', err);
-      }
-
-      this.pendingOCR = null;
-    }, 500);
-  }
+  // _scheduleOCR() {
+  //   if (this.pendingOCR) clearTimeout(this.pendingOCR);
+  //
+  //   this.pendingOCR = setTimeout(async () => {
+  //     if (!this.ocrManager) return;
+  //     console.log('📸 Running OCR after app change…');
+  //
+  //     try {
+  //       const ocrResults = await this.ocrManager.captureAndRecognize();
+  //       if (this.onAppChange && this.currentWindow) {
+  //         this.onAppChange({
+  //           appName: this.currentWindow.application,
+  //           windowTitle: this.currentWindow.title,
+  //           ocrResults
+  //         });
+  //       }
+  //     } catch (err) {
+  //       console.error('❌ OCR error:', err);
+  //     }
+  //
+  //     this.pendingOCR = null;
+  //   }, 500);
+  // }
 
   getCurrentApp() {
     if (!this.currentWindow) return null;

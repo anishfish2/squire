@@ -357,6 +357,8 @@ class AIAssistant {
       // Generate a static user ID for now (in production, this would come from authentication)
       const userId = "550e8400-e29b-41d4-a716-446655440000";
 
+      this.log("user_id" + userId);
+
       const requestData = {
         user_id: userId,
         app_name: appInfo.appName || 'Unknown',
@@ -380,6 +382,7 @@ class AIAssistant {
 
       // Make HTTP request to backend using the new context endpoint
       this.log('📡 Making HTTP request to:', `${this.backendUrl}/api/ai/context`);
+      this.log("requestData userid" + requestData.user_id);
       const response = await this.makeHttpRequest(`${this.backendUrl}/api/ai/context`, {
         method: 'POST',
         headers: {
@@ -474,11 +477,9 @@ class AIAssistant {
     });
   }
 
-  // Clean up old session data periodically
   cleanup() {
     const now = Date.now();
-    const maxAge = 30 * 60 * 1000; // 30 minutes
-
+    const maxAge = 30 * 60 * 1000;
     this.userContext.recentApps.forEach((data, appName) => {
       if (now - data.lastSeen > maxAge) {
         this.userContext.recentApps.delete(appName);
