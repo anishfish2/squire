@@ -23,10 +23,10 @@ from app.core.database import supabase
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    print("🚀 Starting Squire Backend API...")
+    print("Starting Squire Backend API...")
     yield
     # Shutdown
-    print("🛑 Shutting down Squire Backend API...")
+    print("Shutting down Squire Backend API...")
 
 
 # Create FastAPI app

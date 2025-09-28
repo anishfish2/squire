@@ -1,7 +1,7 @@
 """
 AI Service routes for OpenAI integration
 """
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import openai
@@ -9,7 +9,9 @@ import os
 from datetime import datetime
 from uuid import UUID, uuid4
 
+import asyncio
 from app.core.database import get_supabase, execute_query, DatabaseError
+from app.services.ocr_service import PaddleOCRService
 from app.models.schemas import (
     AIContextRequest,
     AIContextResponse,
@@ -50,6 +52,17 @@ def get_openai_client():
         openai_client = openai.OpenAI(api_key=api_key)
         print(f"OpenAI client initialized successfully")
     return openai_client
+
+def print_text_lines(text_lines: list[str]):
+    if not text_lines:
+        print("No text detected.")
+        return
+
+    print("\n=== OCR Extracted Text ===")
+    for idx, line in enumerate(text_lines, start=1):
+        print(f"{idx:02d}. {line}")
+    print("==========================\n")
+
 
 
 class UserContext(BaseModel):
@@ -1555,6 +1568,21 @@ async def test_suggestion_similarity():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error testing similarity: {str(e)}")
+
+
+@router.post("/ocr")
+async def process_ocr(file: UploadFile = File(...)):
+    """Process image with PaddleOCR"""
+    try:
+        image_data = await file.read()
+        ocr_service = PaddleOCRService()
+        
+        text_lines = await asyncio.to_thread(ocr_service.process_image, image_data)
+        print_text_lines(text_lines)
+
+        # return {"text_lines": text_lines}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/health")
