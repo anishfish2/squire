@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Import routers
-from app.routers import ai
+from app.routers import ai, activity
 from app.core.config import settings
 from app.core.database import supabase
 
@@ -57,6 +57,7 @@ if settings.ALLOWED_HOSTS:
 
 # Include routers
 app.include_router(ai.router, prefix="/api/ai", tags=["ai"])
+app.include_router(activity.router, prefix="/api/activity", tags=["activity"])
 
 
 @app.get("/")
@@ -69,7 +70,10 @@ async def root():
         "routes": {
             "ai_suggestions": "/api/ai/suggestions",
             "ai_context": "/api/ai/context",
-            "ai_health": "/api/ai/health"
+            "ai_health": "/api/ai/health",
+            "activity_batch": "/api/activity/activity-batch",
+            "session_stats": "/api/activity/session-stats",
+            "recent_activity": "/api/activity/recent-activity/{user_id}"
         }
     }
 

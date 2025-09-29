@@ -67,47 +67,11 @@ class OCRJobManager:
         job_id = str(uuid.uuid4())
 
         try:
-            # Generate a session_id if not provided
+            # Use the session_id provided from the frontend
             session_id = app_context.get("session_id")
 
             if not session_id:
-                # Create a new user session first
-                session_id = str(uuid.uuid4())
-                user_id = app_context.get("user_id", str(uuid.uuid4()))
-
-                # First ensure user profile exists
-                try:
-                    # Try to create user profile if it doesn't exist
-                    profile_data = {
-                        "id": user_id,
-                        "email": f"user_{user_id[:8]}@example.com",
-                        "full_name": f"User {user_id[:8]}",
-                        "created_at": datetime.now(timezone.utc).isoformat(),
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
-                        "last_active": datetime.now(timezone.utc).isoformat(),
-                        "subscription_tier": "free",
-                        "timezone": "UTC"
-                    }
-                    supabase.table("user_profiles").insert(profile_data).execute()
-                except Exception as e:
-                    # Profile might already exist, that's okay
-                    pass
-
-                session_data = {
-                    "id": session_id,
-                    "user_id": user_id,
-                    "device_info": {
-                        "app_name": app_context.get("app_name"),
-                        "platform": "electron"
-                    },
-                    "session_start": datetime.now(timezone.utc).isoformat(),
-                    "session_type": "active",
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                    "updated_at": datetime.now(timezone.utc).isoformat()
-                }
-
-                # Insert session first
-                supabase.table("user_sessions").insert(session_data).execute()
+                raise Exception("No session_id provided in app_context")
 
             # Store job in ocr_events table with image data
             job_data = {

@@ -21,6 +21,7 @@ let skipNextOCR = false; // For user-initiated focus handling
 let appSwitchDebouncer = null; // For debounced OCR processing
 
 let currentUserId = "550e8400-e29b-41d4-a716-446655440000";
+let currentSessionId = null;
 
 // ----- Helper Functions -----
 function sendToDebug(channel, data) {
@@ -245,7 +246,8 @@ async function processAppOCR(appInfo) {
       const ocrResults = await ocrManager.captureAndRecognize({
         appName: appInfo.appName,
         windowTitle: appInfo.windowTitle,
-        bundleId: appInfo.bundleId || appInfo.execName
+        bundleId: appInfo.bundleId || appInfo.execName,
+        session_id: currentSessionId
       }, currentUserId);
 
       sendToDebug("debug-update", {
@@ -346,6 +348,117 @@ async function processKeystrokeSequence(sequenceData) {
   }
 }
 
+async function createUserSession() {
+  try {
+    console.log("🔄 Creating user session...");
+
+    // First check if there's already an active session and end it
+    try {
+      const existingSessionResponse = await fetch(`http://127.0.0.1:8000/api/activity/current-session/${currentUserId}`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (existingSessionResponse.ok) {
+        const existingResult = await existingSessionResponse.json();
+        console.log(`📋 Found existing active session ${existingResult.session_id}, ending it...`);
+
+        // End the existing session
+        try {
+          await fetch(`http://127.0.0.1:8000/api/activity/end-session/${existingResult.session_id}`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+          });
+          console.log(`✅ Ended previous session ${existingResult.session_id}`);
+        } catch (endError) {
+          console.log(`⚠️ Could not end previous session: ${endError.message}`);
+        }
+      }
+    } catch (existingError) {
+      console.log("No existing session found, creating new one...");
+    }
+
+    // Generate session ID
+    currentSessionId = generateUUID();
+
+    // First ensure user profile exists
+    try {
+      const profileData = {
+        id: currentUserId,
+        email: `user_${currentUserId.slice(0, 8)}@example.com`,
+        full_name: `User ${currentUserId.slice(0, 8)}`,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        last_active: new Date().toISOString(),
+        subscription_tier: "free",
+        timezone: "UTC"
+      };
+
+      const profileResponse = await fetch("http://127.0.0.1:8000/api/activity/profiles", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(profileData),
+      });
+
+      if (profileResponse.ok) {
+        const profileResult = await profileResponse.json();
+        console.log(`✅ Profile creation: ${profileResult.message}`);
+      } else {
+        console.error(`❌ Profile creation failed: ${profileResponse.status} ${profileResponse.statusText}`);
+        const errorText = await profileResponse.text();
+        console.error(`❌ Profile error details: ${errorText}`);
+      }
+    } catch (profileError) {
+      // Profile might already exist, continue with session creation
+    }
+
+    // Create new session
+    const sessionData = {
+      id: currentSessionId,
+      user_id: currentUserId,
+      device_info: {
+        platform: "electron",
+        source: "main_app",
+        app_version: "1.0.0"
+      },
+      session_start: new Date().toISOString(),
+      session_type: "active",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    const sessionResponse = await fetch("http://127.0.0.1:8000/api/activity/sessions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(sessionData),
+    });
+
+    if (sessionResponse.ok) {
+      console.log(`✅ Successfully created session ${currentSessionId}`);
+    } else {
+      console.error(`❌ Failed to create session: ${sessionResponse.status} ${sessionResponse.statusText}`);
+    }
+  } catch (error) {
+    console.error("❌ Error creating session:", error);
+  }
+}
+
+function generateUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c == 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
 function setupPipelines() {
   ocrManager = new OCRManager(suggestionsWindow);
   aiAssistant = new AIAssistant();
@@ -367,7 +480,7 @@ function setupPipelines() {
     } catch (e) {
       console.error("Activity tracker callback error:", e);
     }
-  });
+  }, currentUserId, currentSessionId);
 
   appTracker = new ActiveAppTracker(ocrManager, async (appInfo) => {
     try {
@@ -413,7 +526,7 @@ function setupPipelines() {
     }
   });
 
-  setTimeout(() => {
+  setTimeout(async () => {
     console.log("🚀 Starting trackers…");
     try {
       appTracker.startTracking();
@@ -434,7 +547,7 @@ function setupPipelines() {
       }
     }
     try {
-      activityTracker.startTracking();
+      await activityTracker.startTracking();
     } catch (e) {
       console.error("Activity tracker failed to start:", e);
     }
@@ -447,10 +560,13 @@ function setupPipelines() {
 }
 
 // ----- App Event Handlers -----
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   createMainWindow();
   createDebugWindow();
   createSuggestionsWindow();
+
+  // Create session first, then setup pipelines
+  await createUserSession();
   setupPipelines();
 
   app.on("activate", () => {

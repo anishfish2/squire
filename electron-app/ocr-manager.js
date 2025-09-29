@@ -78,10 +78,11 @@ class OCRManager {
       form.append('window_title', appContext.windowTitle || '');
       form.append('bundle_id', appContext.bundleId || '');
       form.append('user_id', userId);
+      form.append('session_id', appContext.session_id || '');
       form.append('priority', 'normal');
       form.append('session_context', JSON.stringify({
         timestamp: Date.now(),
-        user_initiated: false,  
+        user_initiated: false,
         capture_method: 'auto'
       }));
 

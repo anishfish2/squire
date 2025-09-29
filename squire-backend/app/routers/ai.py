@@ -1729,6 +1729,7 @@ async def queue_ocr_with_context(
     window_title: str = Form(""),
     bundle_id: str = Form(""),
     user_id: str = Form(""),
+    session_id: str = Form(""),
     session_context: str = Form("{}"),
     priority: str = Form("normal")
 ):
@@ -1759,6 +1760,7 @@ async def queue_ocr_with_context(
             "window_title": window_title,
             "bundle_id": bundle_id,
             "user_id": user_id,
+            "session_id": session_id,
             "interaction_context": "app_switch",
             "session_context": context_data,
             "timestamp": datetime.now().isoformat()
