@@ -13,6 +13,7 @@ import asyncio
 from app.core.database import get_supabase, execute_query, DatabaseError
 from app.services.ocr_service import PaddleOCRService
 from app.services.ocr_job_manager import OCRJobManager, JobPriority
+from app.services.keystroke_analysis_service import KeystrokeAnalysisService
 from app.models.schemas import (
     AIContextRequest,
     AIContextResponse,
@@ -35,6 +36,9 @@ openai_client = None
 
 # Initialize OCR Job Manager
 ocr_job_manager = None
+
+# Initialize Keystroke Analysis Service
+keystroke_analysis_service = KeystrokeAnalysisService()
 
 async def get_ocr_job_manager():
     """Get or initialize the OCR job manager"""
@@ -211,6 +215,23 @@ def build_openai_prompt(request: AISuggestionRequest, user_history: dict = None)
                 if recent_sessions > 5:
                     historical_context += "User has been consistently active recently. "
 
+        # Keystroke efficiency patterns
+        if user_history.get("keystroke_patterns"):
+            keystroke_data = user_history["keystroke_patterns"]
+            if keystroke_data:
+                # Analyze efficiency patterns from keystroke data
+                apps_with_patterns = [pattern.get("app_context") for pattern in keystroke_data if pattern.get("app_context")]
+                if apps_with_patterns:
+                    historical_context += f"Recent keystroke patterns in: {', '.join(set(apps_with_patterns))}. "
+
+                # Check for efficiency indicators
+                for pattern in keystroke_data[:2]:  # Look at recent patterns
+                    efficiency_indicators = pattern.get("efficiency_indicators", {})
+                    if efficiency_indicators.get("repetitive_sequences"):
+                        historical_context += f"Detected repetitive keystroke patterns in {pattern.get('app_context', 'recent apps')}. "
+                    if efficiency_indicators.get("navigation_sequences"):
+                        historical_context += f"Frequent navigation key usage in {pattern.get('app_context', 'recent apps')}. "
+
     # Instructions for avoiding duplicates and allowing no suggestions
     duplicate_avoidance = ""
     if user_history and user_history.get("suggestion_history"):
@@ -299,7 +320,8 @@ async def get_user_history(user_id: UUID, supabase=None):
             "time_patterns": {},
             "successful_suggestions": [],
             "dismissed_suggestions": [],
-            "app_transitions": []
+            "app_transitions": [],
+            "keystroke_patterns": []
         }
 
         # Get recent sessions (last 7 days)
@@ -561,6 +583,27 @@ async def get_user_history(user_id: UUID, supabase=None):
                 })
 
             history["time_patterns"] = time_patterns
+
+        # Get recent keystroke patterns for efficiency context
+        try:
+            keystroke_patterns = await keystroke_analysis_service.get_user_keystroke_patterns(
+                user_id=str(user_id),
+                limit=5
+            )
+
+            if keystroke_patterns:
+                history["keystroke_patterns"] = [
+                    {
+                        "app_context": pattern.get("app_context"),
+                        "keystroke_count": pattern.get("keystroke_count"),
+                        "sequence_duration": pattern.get("sequence_duration"),
+                        "created_at": pattern.get("created_at"),
+                        "efficiency_indicators": pattern.get("sequence_data", {}).get("patterns", {})
+                    } for pattern in keystroke_patterns[:3]  # Last 3 patterns
+                ]
+        except Exception as keystroke_error:
+            print(f"Could not fetch keystroke patterns: {keystroke_error}")
+            history["keystroke_patterns"] = []
 
         return history
 
@@ -1741,6 +1784,86 @@ async def queue_ocr_with_context(
     except Exception as e:
         print(f"❌ Contextual OCR queue error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/keystroke-analysis")
+async def analyze_keystroke_sequence(request: dict):
+    """Analyze a keystroke sequence for efficiency patterns and opportunities"""
+    try:
+        user_id = request.get("user_id")
+        sequence_data = request.get("sequence_data")
+        session_context = request.get("session_context", {})
+
+        if not user_id or not sequence_data:
+            raise HTTPException(status_code=400, detail="user_id and sequence_data are required")
+
+        print(f"🎹 Received keystroke analysis request for user {user_id}")
+
+        # Process the keystroke sequence
+        analysis_results = await keystroke_analysis_service.process_keystroke_sequence(
+            user_id=user_id,
+            sequence_data=sequence_data,
+            session_context=session_context
+        )
+
+        return {
+            "status": "success",
+            "sequence_id": analysis_results.get("sequence_id"),
+            "patterns_detected": analysis_results.get("patterns_detected", 0),
+            "efficiency_score": analysis_results.get("efficiency_score", 0.5),
+            "recommendations": analysis_results.get("recommendations", []),
+            "analysis_summary": {
+                "keystroke_count": sequence_data.get("keystroke_count", 0),
+                "sequence_duration": sequence_data.get("sequence_duration", 0),
+                "app_context": sequence_data.get("context_data", {}).get("primary_app", "Unknown")
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error in keystroke analysis endpoint: {e}")
+        raise HTTPException(status_code=500, detail=f"Keystroke analysis failed: {str(e)}")
+
+
+@router.get("/user/{user_id}/keystroke-insights")
+async def get_keystroke_insights(user_id: UUID, app_name: str = None):
+    """Get keystroke efficiency insights for a user"""
+    try:
+        insights = await keystroke_analysis_service.get_efficiency_insights(
+            user_id=str(user_id),
+            app_name=app_name
+        )
+
+        return {
+            "status": "success",
+            "user_id": str(user_id),
+            "insights": insights
+        }
+
+    except Exception as e:
+        print(f"❌ Error getting keystroke insights: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get insights: {str(e)}")
+
+
+@router.get("/user/{user_id}/keystroke-patterns")
+async def get_keystroke_patterns(user_id: UUID, limit: int = 10):
+    """Get recent keystroke patterns for a user"""
+    try:
+        patterns = await keystroke_analysis_service.get_user_keystroke_patterns(
+            user_id=str(user_id),
+            limit=limit
+        )
+
+        return {
+            "status": "success",
+            "user_id": str(user_id),
+            "patterns": patterns
+        }
+
+    except Exception as e:
+        print(f"❌ Error getting keystroke patterns: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get patterns: {str(e)}")
 
 
 @router.get("/health")

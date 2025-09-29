@@ -6,6 +6,7 @@ const OCRManager = require("./ocr-manager");
 const ActiveAppTracker = require("./app-tracker"); // ✅ now uses @paymoapp/active-window
 const ComprehensiveActivityTracker = require("./activity-tracker");
 const AIAssistant = require("./ai-assistant");
+const EfficientKeystrokeCollector = require("./keystroke-collector");
 
 let mainWindow;
 let debugWindow;
@@ -14,6 +15,7 @@ let ocrManager;
 let appTracker;
 let activityTracker;
 let aiAssistant;
+let keystrokeCollector;
 let recentActivityData = null;
 let skipNextOCR = false; // For user-initiated focus handling
 let appSwitchDebouncer = null; // For debounced OCR processing
@@ -304,9 +306,52 @@ async function processAppOCR(appInfo) {
   }
 }
 
+// Process keystroke sequences and send to backend
+async function processKeystrokeSequence(sequenceData) {
+  try {
+    console.log(`🎹 Processing keystroke sequence: ${sequenceData.keystroke_count} keystrokes over ${sequenceData.sequence_duration}ms`);
+
+    // Send keystroke data to backend for analysis
+    const response = await fetch('http://127.0.0.1:8000/api/ai/keystroke-analysis', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        user_id: currentUserId,
+        sequence_data: sequenceData,
+        session_context: {
+          current_activity: recentActivityData,
+          timestamp: Date.now()
+        }
+      })
+    });
+
+    if (response.ok) {
+      const result = await response.json();
+      console.log(`✅ Keystroke sequence processed: ${result.patterns_detected || 0} patterns detected`);
+
+      // Update debug window with keystroke info
+      sendToDebug("keystroke-update", {
+        sequenceId: sequenceData.sequence_id,
+        keystrokeCount: sequenceData.keystroke_count,
+        patternsDetected: result.patterns_detected || 0,
+        efficiency_score: result.efficiency_score || 'unknown'
+      });
+    } else {
+      console.error('❌ Failed to process keystroke sequence:', response.statusText);
+    }
+  } catch (error) {
+    console.error('❌ Error processing keystroke sequence:', error);
+  }
+}
+
 function setupPipelines() {
   ocrManager = new OCRManager(suggestionsWindow);
   aiAssistant = new AIAssistant();
+
+  // Initialize keystroke collector
+  keystrokeCollector = new EfficientKeystrokeCollector(processKeystrokeSequence);
 
   // Initialize debouncer
   appSwitchDebouncer = new AppSwitchDebouncer(500);
@@ -350,6 +395,16 @@ function setupPipelines() {
         return; // Skip processing our own app
       }
 
+      // Update keystroke collector context
+      if (keystrokeCollector) {
+        keystrokeCollector.updateContext({
+          app_name: appInfo.appName,
+          window_title: appInfo.windowTitle,
+          bundle_id: appInfo.bundleId || appInfo.execName,
+          timestamp: Date.now()
+        });
+      }
+
       // Schedule debounced OCR processing for valid apps
       appSwitchDebouncer.scheduleOCR(appInfo);
 
@@ -383,6 +438,11 @@ function setupPipelines() {
     } catch (e) {
       console.error("Activity tracker failed to start:", e);
     }
+    try {
+      keystrokeCollector.startTracking();
+    } catch (e) {
+      console.error("Keystroke collector failed to start:", e);
+    }
   }, 800);
 }
 
@@ -405,6 +465,24 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
+  }
+});
+
+app.on("before-quit", () => {
+  console.log("🛑 App shutting down, cleaning up...");
+
+  // Clean up keystroke collector
+  if (keystrokeCollector) {
+    keystrokeCollector.stopTracking();
+  }
+
+  // Clean up other trackers
+  if (appTracker) {
+    appTracker.stopTracking();
+  }
+
+  if (activityTracker) {
+    activityTracker.stopTracking();
   }
 });
 
