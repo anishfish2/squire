@@ -314,30 +314,7 @@ function toggleDebugPanel() {
   debugPanel.style.display = (debugPanel.style.display === 'none') ? 'block' : 'none';
 }
 
-// ---- Dragging logic ----
-// function makeElementDraggable(el) {
-//   let isDragging = false;
-//   let offsetX, offsetY;
-//
-//   el.addEventListener('mousedown', (e) => {
-//     isDragging = true;
-//     offsetX = e.clientX - el.offsetLeft;
-//     offsetY = e.clientY - el.offsetTop;
-//     el.style.position = 'absolute';
-//     el.style.zIndex = 9999;
-//     e.preventDefault();
-//   });
-//
-//   document.addEventListener('mousemove', (e) => {
-//     if (!isDragging) return;
-//     el.style.left = e.clientX - offsetX + 'px';
-//     el.style.top = e.clientY - offsetY + 'px';
-//   });
-//
-//   document.addEventListener('mouseup', () => {
-//     isDragging = false;
-//   });
-// }
+
 
 // Make function available globally
 window.showDetailedGuide = showDetailedGuide;
@@ -346,13 +323,5 @@ window.showDetailedGuide = showDetailedGuide;
 document.addEventListener('DOMContentLoaded', () => {
   init();
 
-  // // Make draggable
-  // const textBoxEl = document.getElementById('textBox');
-  // const debugPanelEl = document.getElementById('debug-panel');
-  // const dotEl = document.getElementById('dot');
-  //
-  // if (textBoxEl) makeElementDraggable(textBoxEl);
-  // if (debugPanelEl) makeElementDraggable(debugPanelEl);
-  // if (dotEl) makeElementDraggable(dotEl);
 });
 

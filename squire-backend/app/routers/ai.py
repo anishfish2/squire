@@ -1,13 +1,15 @@
 """
-AI Service routes for OpenAI integration
+AI Service routes for OpenAI integration with enhanced context analysis
 """
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import openai
 import os
-from datetime import datetime
+import json
+from datetime import datetime, timedelta
 from uuid import UUID, uuid4
+from dataclasses import dataclass
 
 import asyncio
 from app.core.database import get_supabase, execute_query, DatabaseError
@@ -70,6 +72,172 @@ def get_openai_client():
         print(f"OpenAI client initialized successfully")
     return openai_client
 
+# Enhanced Context Analysis Classes
+@dataclass
+class ContextAnalysisResult:
+    concepts: List[str]
+    tools: List[str]
+    current_activity: str
+    context_type: str  # "work", "learning", "debugging", "creating", etc.
+    domain: str
+    confidence_score: float
+
+@dataclass
+class MultiLevelContext:
+    micro: str      # immediate activity (5-30 seconds)
+    task: str       # current task (minutes)
+    app: str        # app-level work (minutes to hours)
+    session: str    # session theme (hours)
+
+
+async def analyze_current_context(ocr_lines: List[str],
+                                app_context: str = "",
+                                recent_activities: List[str] = None) -> ContextAnalysisResult:
+    """Use LLM to understand what the user is currently doing"""
+
+    client = get_openai_client()
+    if not ocr_lines or not client:
+        return ContextAnalysisResult([], [], "unknown", "work", "general", 0.0)
+
+    content = '\n'.join(ocr_lines)
+    history_context = ""
+    if recent_activities:
+        history_context = f"\nRecent activities: {', '.join(recent_activities[-3:])}"
+
+    prompt = f"""Analyze what the user is currently doing based on their screen content.
+
+CURRENT SCREEN:
+App: {app_context or 'Unknown'}
+Content:
+{content}
+{history_context}
+
+Return JSON with immediate context:
+{{
+  "current_activity": "brief description of immediate activity",
+  "context_type": "work|learning|debugging|creating|researching|communicating|planning|analyzing",
+  "domain": "general field or subject area",
+  "concepts": ["relevant concept1", "concept2"],
+  "tools": ["tool1", "tool2"],
+  "confidence_score": 0.8
+}}"""
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a context analyst. Understand what the user is currently doing and provide relevant context. Always respond with valid JSON."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            max_tokens=400,
+            temperature=0.2,
+            response_format={"type": "json_object"}
+        )
+
+        analysis = json.loads(response.choices[0].message.content)
+
+        return ContextAnalysisResult(
+            concepts=analysis.get('concepts', []),
+            tools=analysis.get('tools', []),
+            current_activity=analysis.get('current_activity', 'general_work'),
+            context_type=analysis.get('context_type', 'work'),
+            domain=analysis.get('domain', 'general'),
+            confidence_score=analysis.get('confidence_score', 0.5)
+        )
+
+    except Exception as e:
+        print(f"Error in context analysis: {e}")
+        return ContextAnalysisResult([], [], "unknown", "work", "general", 0.0)
+
+
+async def analyze_multi_level_context(current_ocr: List[str],
+                                    app_context: str,
+                                    user_history: Dict = None) -> MultiLevelContext:
+    """Analyze context at multiple time scales using LLM"""
+
+    client = get_openai_client()
+    if not client:
+        return MultiLevelContext("unknown", "unknown", "unknown", "unknown")
+
+    current_content = '\n'.join(current_ocr)
+
+    # Build context from user history
+    recent_context = ""
+    session_context = ""
+
+    if user_history:
+        if user_history.get('recent_suggestions'):
+            recent_suggestions = [s.get('type', '') for s in user_history['recent_suggestions'][:3]]
+            recent_context = f"Recent suggestion types: {', '.join(recent_suggestions)}"
+
+        if user_history.get('workflow_patterns'):
+            patterns = list(user_history['workflow_patterns'].keys())[:3]
+            session_context = f"User workflow patterns: {', '.join(patterns)}"
+
+    prompt = f"""Analyze user context at multiple time scales.
+
+CURRENT MOMENT:
+App: {app_context}
+Screen: {current_content}
+
+RECENT CONTEXT:
+{recent_context}
+
+SESSION CONTEXT:
+{session_context}
+
+Provide context understanding at 4 levels:
+1. MICRO (immediate 5-30 seconds): What are they doing right now?
+2. TASK (current minutes): What task/goal are they working on?
+3. APP (app session): What are they accomplishing in this app?
+4. SESSION (hours): What's the overarching theme of this work session?
+
+Return JSON:
+{{
+  "micro_context": "immediate action (e.g., 'reading error message', 'typing code')",
+  "task_context": "current task (e.g., 'debugging authentication issue')",
+  "app_context": "app-level work (e.g., 'developing new feature')",
+  "session_context": "session theme (e.g., 'product development work')"
+}}"""
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a context analyst specializing in understanding user activity patterns across different time scales. Always respond with valid JSON."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            max_tokens=500,
+            temperature=0.2,
+            response_format={"type": "json_object"}
+        )
+
+        analysis = json.loads(response.choices[0].message.content)
+
+        return MultiLevelContext(
+            micro=analysis.get('micro_context', 'working'),
+            task=analysis.get('task_context', 'general task'),
+            app=analysis.get('app_context', 'using application'),
+            session=analysis.get('session_context', 'work session')
+        )
+
+    except Exception as e:
+        print(f"Error in multi-level context analysis: {e}")
+        return MultiLevelContext("unknown", "unknown", "unknown", "unknown")
+
+
 def print_text_lines(text_lines: list[str]):
     if not text_lines:
         print("No text detected.")
@@ -128,13 +296,47 @@ class SuggestionsResponse(BaseModel):
     suggestions: List[AISuggestionResponse]
 
 
-def build_openai_prompt(request: AISuggestionRequest, user_history: dict = None) -> str:
-    """Build the enhanced OpenAI prompt leveraging comprehensive user history"""
+async def build_enhanced_openai_prompt(request: AISuggestionRequest, user_history: dict = None) -> str:
+    """Build the enhanced OpenAI prompt with LLM-driven context analysis"""
 
     ocr_context = ""
     if request.recent_ocr_context.text_lines:
         recent_text = '\n'.join(request.recent_ocr_context.text_lines)
         ocr_context += f"Recent screen content:\n{recent_text}"
+
+        # Get enhanced context analysis
+        try:
+            current_context = await analyze_current_context(
+                request.recent_ocr_context.text_lines,
+                request.current_session.current_app,
+                user_history.get('recent_activities', []) if user_history else None
+            )
+
+            multi_level_context = await analyze_multi_level_context(
+                request.recent_ocr_context.text_lines,
+                request.current_session.current_app,
+                user_history
+            )
+
+            # Enhanced context information
+            ocr_context += f"\n\nCONTEXT ANALYSIS:"
+            ocr_context += f"\n• Current activity: {current_context.current_activity}"
+            ocr_context += f"\n• Activity type: {current_context.context_type}"
+            ocr_context += f"\n• Domain: {current_context.domain}"
+            if current_context.concepts:
+                ocr_context += f"\n• Key concepts: {', '.join(current_context.concepts)}"
+            if current_context.tools:
+                ocr_context += f"\n• Tools in use: {', '.join(current_context.tools)}"
+
+            ocr_context += f"\n\nMULTI-LEVEL CONTEXT:"
+            ocr_context += f"\n• Right now: {multi_level_context.micro}"
+            ocr_context += f"\n• Current task: {multi_level_context.task}"
+            ocr_context += f"\n• App session: {multi_level_context.app}"
+            ocr_context += f"\n• Overall session: {multi_level_context.session}"
+
+        except Exception as e:
+            print(f"Error in enhanced context analysis: {e}")
+            # Fall back to basic context
 
     # App usage context
     top_apps = sorted(
@@ -162,7 +364,6 @@ def build_openai_prompt(request: AISuggestionRequest, user_history: dict = None)
             if current_app in user_history["workflow_patterns"]:
                 workflow = user_history["workflow_patterns"][current_app]
                 primary_activity = workflow.get("primary_activity", "general")
-
                 historical_context += f"In {current_app}, user typically: {primary_activity}. "
 
         # App transition patterns
@@ -204,7 +405,6 @@ def build_openai_prompt(request: AISuggestionRequest, user_history: dict = None)
                 historical_context += "User tends to have longer work sessions. "
             if total_suggestions > 20:
                 historical_context += "User actively engages with suggestions. "
-
 
         # Time patterns
         if user_history.get("time_patterns"):
@@ -304,6 +504,13 @@ Return JSON (either one suggestion OR empty array):
 If no novel suggestion possible, return: {{"suggestions": []}}"""
 
     return prompt
+
+
+def build_openai_prompt(request: AISuggestionRequest, user_history: dict = None) -> str:
+    """Legacy function - kept for compatibility"""
+    # This will be replaced by build_enhanced_openai_prompt but keeping for now
+    import asyncio
+    return asyncio.run(build_enhanced_openai_prompt(request, user_history))
 
 
 async def get_user_history(user_id: UUID, supabase=None):
@@ -891,12 +1098,22 @@ async def save_context_data(request: AIContextRequest, suggestions: List[AISugge
 
 
 async def update_knowledge_graph(context_request: AIContextRequest, ai_request: AISuggestionRequest, suggestions: List[AISuggestionResponse], supabase=None):
-    """Update knowledge graph based on detected patterns and app usage"""
+    """Update knowledge graph based on enhanced context analysis and app usage"""
     try:
         user_id = str(context_request.user_id)
 
-        # Create tool/app knowledge node
-        
+        # Get enhanced context analysis
+        current_context = await analyze_current_context(
+            context_request.ocr_text,
+            context_request.app_name
+        )
+
+        multi_level_context = await analyze_multi_level_context(
+            context_request.ocr_text,
+            context_request.app_name
+        )
+
+        # Create enhanced tool/app knowledge node
         app_node_data = {
             "user_id": user_id,
             "node_type": NodeType.TOOL.value,
@@ -904,21 +1121,114 @@ async def update_knowledge_graph(context_request: AIContextRequest, ai_request: 
                 "name": ai_request.current_session.current_app,
                 "description": f"Application: {ai_request.current_session.current_app}",
                 "category": "software",
-                "last_used": datetime.now().isoformat()
+                "last_used": datetime.now().isoformat(),
+                "current_context": current_context.context_type,
+                "domain": current_context.domain,
+                "session_theme": multi_level_context.session
             },
             "weight": 1.0
         }
+
+        # Create CONCEPT nodes from detected concepts
+        for concept in current_context.concepts:
+            concept_node_data = {
+                "user_id": user_id,
+                "node_type": NodeType.CONCEPT.value,
+                "content": {
+                    "name": concept,
+                    "description": f"Concept: {concept}",
+                    "category": current_context.domain,
+                    "last_detected": datetime.now().isoformat(),
+                    "confidence": current_context.confidence_score
+                },
+                "weight": 0.5
+            }
+
+            # Check if concept node exists
+            existing_concepts = await execute_query(
+                table="knowledge_nodes",
+                operation="select",
+                filters={"user_id": user_id, "node_type": NodeType.CONCEPT.value}
+            )
+
+            concept_exists = any(
+                node.get("content", {}).get("name") == concept
+                for node in existing_concepts
+            ) if existing_concepts else False
+
+            if not concept_exists:
+                await execute_query(
+                    table="knowledge_nodes",
+                    operation="insert",
+                    data=concept_node_data
+                )
+            else:
+                # Update existing concept weight
+                for node in existing_concepts:
+                    if node.get("content", {}).get("name") == concept:
+                        await execute_query(
+                            table="knowledge_nodes",
+                            operation="update",
+                            data={"weight": min(node.get("weight", 0.5) + 0.1, 3.0)},
+                            filters={"id": node["id"]}
+                        )
+                        break
+
+        # Create SKILL nodes from detected tools/skills
+        for tool in current_context.tools:
+            skill_node_data = {
+                "user_id": user_id,
+                "node_type": NodeType.SKILL.value,
+                "content": {
+                    "name": f"{tool}_usage",
+                    "description": f"Skill in using {tool}",
+                    "category": "tool_proficiency",
+                    "last_used": datetime.now().isoformat(),
+                    "context": current_context.context_type
+                },
+                "weight": 0.7
+            }
+
+            # Check if skill node exists
+            existing_skills = await execute_query(
+                table="knowledge_nodes",
+                operation="select",
+                filters={"user_id": user_id, "node_type": NodeType.SKILL.value}
+            )
+
+            skill_exists = any(
+                node.get("content", {}).get("name") == f"{tool}_usage"
+                for node in existing_skills
+            ) if existing_skills else False
+
+            if not skill_exists:
+                await execute_query(
+                    table="knowledge_nodes",
+                    operation="insert",
+                    data=skill_node_data
+                )
+            else:
+                # Update existing skill weight
+                for node in existing_skills:
+                    if node.get("content", {}).get("name") == f"{tool}_usage":
+                        await execute_query(
+                            table="knowledge_nodes",
+                            operation="update",
+                            data={"weight": min(node.get("weight", 0.7) + 0.2, 5.0)},
+                            filters={"id": node["id"]}
+                        )
+                        break
 
         print("App node data prepared:", app_node_data)
 
 
         # Check if node exists (using content to match since name column doesn't exist)
-        existing_node = await execute_query(
+        existing_nodes = await execute_query(
             table="knowledge_nodes",
             operation="select",
-            filters={"user_id": user_id, "node_type": NodeType.TOOL.value},
-            single=True
+            filters={"user_id": user_id, "node_type": NodeType.TOOL.value}
         )
+        existing_node = existing_nodes[0] if existing_nodes else None
 
         if not existing_node:
             print("Creating new node")
@@ -963,12 +1273,12 @@ async def update_knowledge_graph(context_request: AIContextRequest, ai_request: 
                     "weight": 0.3
                 }
 
-                existing_pattern = await execute_query(
+                existing_patterns = await execute_query(
                     table="knowledge_nodes",
                     operation="select",
-                    filters={"user_id": user_id, "node_type": NodeType.PATTERN.value},
-                    single=True
+                    filters={"user_id": user_id, "node_type": NodeType.PATTERN.value}
                 )
+                existing_pattern = existing_patterns[0] if existing_patterns else None
 
                 print("Pattern node data prepared:", pattern_node_data)
 
@@ -1095,9 +1405,9 @@ async def save_ai_context(
         # Get user history for enhanced context
         user_history = await get_user_history(request.user_id, supabase)
 
-        # Generate AI suggestions with historical context
+        # Generate AI suggestions with enhanced historical context
         client = get_openai_client()
-        prompt = build_openai_prompt(ai_request, user_history)
+        prompt = await build_enhanced_openai_prompt(ai_request, user_history)
 
         response = client.chat.completions.create(
             model="gpt-4o-mini",
