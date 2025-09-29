@@ -466,12 +466,7 @@ class AIAssistant {
         req.write(options.body);
       }
 
-      // Add a timeout
-      req.setTimeout(10000, () => {
-        this.log('⏰ Request timeout after 10 seconds');
-        req.destroy();
-        reject(new Error('Request timeout'));
-      });
+      // No timeout - let requests complete naturally
 
       req.end();
     });
