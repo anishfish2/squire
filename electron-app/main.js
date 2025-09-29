@@ -168,9 +168,9 @@ function createSuggestionsWindow() {
   const { width } = screen.getPrimaryDisplay().workAreaSize;
 
   suggestionsWindow = new BrowserWindow({
-    width: 350,
-    height: 400,
-    x: width - 370,
+    width: 400,
+    height: 500,
+    x: width - 420,
     y: 20,
     alwaysOnTop: true,
     frame: false,
