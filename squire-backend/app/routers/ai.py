@@ -2631,7 +2631,7 @@ async def process_batch_context(request: BatchContextRequest):
             if recent_ocr:
                 recent_ocr_context = "\nRECENT SCREEN CONTENT (Last Hour):\n"
                 for ocr_event in recent_ocr[:3]:  # Just show last 3 for context
-                    app_name = ocr_event.get('app_context', {}).get('app_name', 'Unknown')
+                    app_name = ocr_event.get('app_name', 'Unknown')  # Direct column, not nested
                     timestamp = ocr_event.get('created_at', '')[:16]  # Just date and time
                     context = ocr_event.get('meaningful_context', '') or 'No context available'
                     recent_ocr_context += f"• {timestamp} ({app_name}): {context}\n"

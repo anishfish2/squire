@@ -142,7 +142,7 @@ class OCRBatchManager {
   constructor() {
     this.pendingBatch = [];
     this.batchTimeout = null;
-    this.batchWindow = 3000; // 3 seconds to collect related OCRs
+    this.batchWindow = 10000; // 10 seconds to wait for OCR completion
     this.maxBatchSize = 5; // Max 5 apps per batch
     this.currentSequenceId = null;
     this.pendingOCRJobs = new Map(); // Track pending OCR jobs by job_id
