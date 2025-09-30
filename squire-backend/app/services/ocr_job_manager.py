@@ -7,6 +7,7 @@ import traceback
 
 from app.core.database import supabase
 from app.services.ocr_service import PaddleOCRService
+from app.services.websocket_manager import ws_manager
 
 
 class JobStatus(Enum):
@@ -26,7 +27,7 @@ class OCRJobManager:
     def __init__(self, max_workers: int = 4):
         self.max_workers = max_workers
         self.active_workers: Dict[str, asyncio.Task] = {}
-        self.ocr_service = PaddleOCRService()
+        self.ocr_services: Dict[str, PaddleOCRService] = {}  # One per worker
         self.is_running = False
 
     async def start(self):
@@ -93,7 +94,10 @@ class OCRJobManager:
                 "extracted_entities": [],
                 "error_message": None,
                 "image_data_size": len(image_data),
-                "context_data": app_context.get("session_context", {})
+                "context_data": {
+                    **app_context.get("session_context", {}),
+                    "user_id": app_context.get("user_id")
+                }
             }
 
             # Insert job into database
@@ -130,6 +134,11 @@ class OCRJobManager:
         """Main worker loop for processing jobs"""
         print(f"👷 Worker {worker_id} started")
 
+        # Initialize OCR service for this worker
+        print(f"👷 Worker {worker_id} initializing OCR service...")
+        self.ocr_services[worker_id] = PaddleOCRService()
+        print(f"✅ Worker {worker_id} OCR service ready")
+
         while self.is_running:
             try:
                 # Get next pending job
@@ -149,6 +158,9 @@ class OCRJobManager:
                 traceback.print_exc()
                 await asyncio.sleep(5)  # Wait before retrying
 
+        # Cleanup worker's OCR service
+        if worker_id in self.ocr_services:
+            del self.ocr_services[worker_id]
         print(f"👷 Worker {worker_id} stopped")
 
     async def _get_next_job(self, worker_id: str) -> Optional[Dict]:
@@ -194,10 +206,28 @@ class OCRJobManager:
             if not image_data:
                 raise Exception(f"No image data found for job {job_id}")
 
-            # Extract text using OCR service
-            text_lines = await asyncio.to_thread(self.ocr_service.process_image, image_data)
+            # Extract text using worker's dedicated OCR service
+            worker_ocr = self.ocr_services.get(worker_id)
+            if not worker_ocr:
+                raise Exception(f"No OCR service initialized for worker {worker_id}")
+
+            text_lines = await asyncio.to_thread(worker_ocr.process_image, image_data)
 
             print(f"📝 Extracted {len(text_lines)} text lines from job {job_id}")
+
+            # Extract meaningful context from OCR text
+            from app.routers.ai import extract_meaningful_context
+            meaningful_context = ""
+            try:
+                meaningful_context = await extract_meaningful_context(
+                    text_lines,
+                    job.get("app_name", ""),
+                    job.get("window_title", "")
+                )
+                print(f"📝 Meaningful context extracted for job {job_id}: {meaningful_context[:100]}...")
+            except Exception as e:
+                print(f"⚠️ Failed to extract meaningful context for job {job_id}: {e}")
+                meaningful_context = ""
 
             # Detect interaction context and entities
             interaction_context = self._analyze_interaction_context(job, text_lines)
@@ -208,11 +238,15 @@ class OCRJobManager:
                 "job_status": JobStatus.COMPLETED.value,
                 "completed_at": datetime.now(timezone.utc).isoformat(),
                 "ocr_text": text_lines,
+                "meaningful_context": meaningful_context,
                 "interaction_context": interaction_context,
                 "extracted_entities": extracted_entities
             }
 
             supabase.table("ocr_events").update(completion_data).eq("id", job_id).execute()
+
+            # Emit WebSocket notification for job completion
+            await self._emit_job_completion_websocket(job, text_lines, extracted_entities, meaningful_context)
 
             # Trigger additional processing
             await self._post_process_job(job, text_lines, extracted_entities)
@@ -343,6 +377,54 @@ class OCRJobManager:
         # Implementation for suggestion generation
         pass
 
+    async def _emit_job_completion_websocket(self, job: Dict, text_lines: List[str], extracted_entities: List[Dict], meaningful_context: str = ""):
+        """Emit WebSocket notification for job completion"""
+        try:
+            # Extract user_id from the session_id (assuming user_id is part of session_id)
+            session_id = job.get("session_id")
+            if not session_id:
+                print(f"⚠️ No session_id found for job {job['id']}, cannot emit WebSocket event")
+                return
+
+            # Extract user_id from context_data - this should be provided when queuing the job
+            context_data = job.get("context_data", {})
+            user_id = context_data.get("user_id") or "550e8400-e29b-41d4-a716-446655440000"  # fallback to known user
+
+            # Debug logging
+            print(f"🔍 OCR Job {job['id']} - Session ID: {session_id}")
+            print(f"🔍 OCR Job {job['id']} - Context data: {context_data}")
+            print(f"🔍 OCR Job {job['id']} - Extracted user_id: {user_id}")
+
+            # Prepare job completion data
+            job_data = {
+                "job_id": job["id"],
+                "session_id": session_id,
+                "status": "completed",
+                "text_lines": text_lines,
+                "app_context": {
+                    "app_name": job.get("app_name"),
+                    "window_title": job.get("window_title"),
+                    "bundle_id": job.get("bundle_id"),
+                    "application_type": job.get("application_type"),
+                    "interaction_context": job.get("interaction_context"),
+                    "meaningful_context": meaningful_context
+                },
+                "extracted_entities": extracted_entities,
+                "completed_at": job.get("completed_at")
+            }
+
+            # Emit to user room
+            success = await ws_manager.emit_ocr_job_complete(user_id, job_data)
+
+            if success:
+                print(f"📡 Emitted WebSocket OCR completion for job {job['id']} to user {user_id}")
+            else:
+                print(f"⚠️ Failed to emit WebSocket OCR completion for job {job['id']} (no active connections)")
+
+        except Exception as e:
+            print(f"❌ Error emitting WebSocket OCR completion for job {job['id']}: {e}")
+            # Don't re-raise - this is not critical for job completion
+
     async def get_job_status(self, job_id: str) -> Optional[Dict]:
         """Get the status of a specific job"""
         try:
@@ -372,3 +454,5 @@ class OCRJobManager:
         except Exception as e:
             print(f"❌ Error getting queue stats: {e}")
             return {}
+
+    # Removed SSE emission method - will use WebSocket for real-time notifications

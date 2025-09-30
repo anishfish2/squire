@@ -31,7 +31,8 @@
     "form-data": "^4.0.4",
     "node-global-key-listener": "^0.3.0",
     "node-mac-permissions": "^2.5.0",
-    "screenshot-desktop": "^1.12.7"
+    "screenshot-desktop": "^1.12.7",
+    "socket.io-client": "^4.8.1"
   },
   "build": {
     "appId": "com.anishkarthik.squire",
@@ -49,6 +50,7 @@
       "suggestions.js",
       "styles.css",
       "ocr-manager.js",
+      "websocket-manager.js",
       "app-tracker.js",
       "activity-tracker.js",
       "keystroke-collector.js",

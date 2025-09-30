@@ -11,7 +11,7 @@ try {
   try {
     fetch = require("node-fetch");
   } catch (e2) {
-    console.warn("⚠️ fetch not available, activity tracking will work locally only");
+    // Fetch not available
     fetch = () => Promise.reject(new Error("fetch not available"));
   }
 }
@@ -35,6 +35,17 @@ class ComprehensiveActivityTracker {
     this.mouseMovementBuffer = [];
     this.lastActivityTime = Date.now();
 
+    // Smart OCR Triggering State
+    this.pauseDetection = {
+      isInPause: false,
+      pauseThreshold: 3000, // 3 seconds
+      lastActivityTime: Date.now(),
+      wasActiveBeforePause: false
+    };
+
+    // OCR Manager reference (set externally)
+    this.ocrManager = null;
+
     // Intervals
     this.appCheckInterval = null;
     this.mouseTrackingInterval = null;
@@ -56,7 +67,7 @@ class ComprehensiveActivityTracker {
     if (this.isTracking) return;
 
     this.isTracking = true;
-    console.log("🔍 Starting comprehensive activity tracking...");
+    // Starting tracking
 
     // Start various tracking components
     this.startAppTracking();
@@ -67,9 +78,9 @@ class ComprehensiveActivityTracker {
 
     // Session ID should already be provided from main.js
     if (this.sessionId) {
-      console.log(`📋 Using provided session ID: ${this.sessionId}`);
+      // Session ID set
     } else {
-      console.warn("⚠️ No session ID provided to activity tracker");
+      // No session ID
     }
 
     this.addEvent("session_start", {
@@ -82,7 +93,7 @@ class ComprehensiveActivityTracker {
     if (!this.isTracking) return;
 
     this.isTracking = false;
-    console.log("🛑 Stopping comprehensive activity tracking...");
+    // Stopping tracking
 
     // Clear all intervals
     if (this.appCheckInterval) clearInterval(this.appCheckInterval);
@@ -141,6 +152,7 @@ class ComprehensiveActivityTracker {
 
         this.currentApp = newAppName;
         this.sessionStats.appSwitches++;
+        this.updateActivityForPauseDetection();
       }
 
       // Detect window switch within same app
@@ -157,7 +169,7 @@ class ComprehensiveActivityTracker {
         this.sessionStats.windowSwitches++;
       }
     } catch (error) {
-      console.error("Error checking active app:", error);
+      // App check error
     }
   }
 
@@ -192,6 +204,7 @@ class ComprehensiveActivityTracker {
         });
 
         this.lastActivityTime = Date.now();
+        this.updateActivityForPauseDetection();
 
         // Keep buffer from growing unbounded
         if (this.mouseMovementBuffer.length > 200) {
@@ -278,17 +291,69 @@ class ComprehensiveActivityTracker {
 
           this.sessionStats.keystrokes++;
           this.lastActivityTime = Date.now();
+          this.updateActivityForPauseDetection();
         });
       } catch (error) {
-        console.warn(`Could not register shortcut: ${key}`);
+        // Shortcut registration failed
       }
     });
+  }
+
+  // Smart OCR Triggering - Pause Detection
+  updateActivityForPauseDetection() {
+    const now = Date.now();
+
+    // If we were in a pause and now have activity, trigger OCR
+    if (this.pauseDetection.isInPause && this.pauseDetection.wasActiveBeforePause) {
+      // Activity resumed
+      this.triggerSmartOCR("activity_resumed");
+      this.pauseDetection.isInPause = false;
+    }
+
+    this.pauseDetection.lastActivityTime = now;
+    this.pauseDetection.wasActiveBeforePause = true;
+  }
+
+  checkForPause() {
+    const now = Date.now();
+    const timeSinceActivity = now - this.pauseDetection.lastActivityTime;
+
+    // If we've been inactive for the threshold and weren't already in pause
+    if (timeSinceActivity >= this.pauseDetection.pauseThreshold &&
+        !this.pauseDetection.isInPause &&
+        this.pauseDetection.wasActiveBeforePause) {
+
+      // Pause detected
+      this.pauseDetection.isInPause = true;
+    }
+  }
+
+  triggerSmartOCR(reason) {
+    // Use the smart scheduler if available, otherwise fall back to direct OCR
+    if (global.smartOCRScheduler && global.smartOCRScheduler.triggerImmediateOCR) {
+      // Smart OCR scheduled
+      global.smartOCRScheduler.triggerImmediateOCR({
+        appName: this.currentApp,
+        windowTitle: this.currentWindow,
+        session_id: this.sessionId
+      }, reason);
+    } else if (this.ocrManager && this.ocrManager.triggerSmartOCR) {
+      // Fallback OCR triggered
+      this.ocrManager.triggerSmartOCR(reason, {
+        appName: this.currentApp,
+        windowTitle: this.currentWindow,
+        session_id: this.sessionId
+      }, this.userId);
+    }
   }
 
   // Idle Detection
   startIdleDetection() {
     this.idleCheckInterval = setInterval(() => {
       const timeSinceActivity = Date.now() - this.lastActivityTime;
+
+      // Check for pause detection
+      this.checkForPause();
 
       if (timeSinceActivity > 30000) {
         this.addEvent("idle_detected", {

@@ -14,19 +14,22 @@ from dotenv import load_dotenv
 # Load environment variables explicitly
 load_dotenv()
 
-# Import routers
-from app.routers import ai, activity
+# Import routers and services
+from app.routers import ai, activity, websocket
+from app.services.websocket_manager import ws_manager
 from app.core.config import settings
 from app.core.database import supabase
+import socketio
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    print("Starting Squire Backend API...")
+    print("🚀 Starting Squire Backend API...")
+    print("🔌 WebSocket Manager ready for connections")
     yield
     # Shutdown
-    print("Shutting down Squire Backend API...")
+    print("🛑 Shutting down Squire Backend API...")
 
 
 # Create FastAPI app
@@ -58,6 +61,10 @@ if settings.ALLOWED_HOSTS:
 # Include routers
 app.include_router(ai.router, prefix="/api/ai", tags=["ai"])
 app.include_router(activity.router, prefix="/api/activity", tags=["activity"])
+app.include_router(websocket.router, prefix="/api/ws", tags=["websockets"])
+
+# Create combined ASGI app with SocketIO support
+socket_app = socketio.ASGIApp(ws_manager.sio, app)
 
 
 @app.get("/")
@@ -119,7 +126,7 @@ async def http_exception_handler(request, exc):
 
 if __name__ == "__main__":
     uvicorn.run(
-        "main:app",
+        "main:socket_app",
         host=settings.HOST,
         port=settings.PORT,
         reload=settings.DEBUG,

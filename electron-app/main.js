@@ -18,7 +18,8 @@ let aiAssistant;
 let keystrokeCollector;
 let recentActivityData = null;
 let skipNextOCR = false; // For user-initiated focus handling
-let appSwitchDebouncer = null; // For debounced OCR processing
+let smartOCRScheduler = null; // For smart OCR scheduling
+let ocrBatchManager = null; // For OCR result batching
 
 let currentUserId = "550e8400-e29b-41d4-a716-446655440000";
 let currentSessionId = null;
@@ -36,39 +37,86 @@ function sendToSuggestions(channel, data) {
   }
 }
 
-// ----- App Switch Debouncer -----
-class AppSwitchDebouncer {
+// ----- Smart OCR Scheduler -----
+class SmartOCRScheduler {
   constructor(delay = 500) {
     this.delay = delay;
-    this.pendingApp = null;
     this.timeout = null;
+    this.fallbackTimeout = null;
+    this.pendingApp = null;
     this.processCallback = null;
+    this.lastOCRTime = 0;
+    this.minTimeBetweenOCR = 5000; // 5 seconds minimum
+    this.fallbackInterval = 30000; // 30 seconds fallback
+    this.lastAppInfo = null;
+
+    // Start fallback timer
+    this.startFallbackTimer();
   }
 
   setProcessCallback(callback) {
     this.processCallback = callback;
   }
 
-  scheduleOCR(appInfo) {
+  scheduleOCR(appInfo, reason = "app_switch") {
     // Cancel previous pending OCR
     if (this.timeout) {
       clearTimeout(this.timeout);
     }
 
-    // Store the latest app
-    this.pendingApp = appInfo;
+    // Check if we should skip due to time constraints
+    const now = Date.now();
+    if (now - this.lastOCRTime < this.minTimeBetweenOCR) {
+      // OCR rate limiting
+      this.pendingApp = appInfo;
+      this.timeout = setTimeout(() => {
+        this.executeOCR(appInfo, reason);
+      }, this.minTimeBetweenOCR - (now - this.lastOCRTime));
+      return;
+    }
 
-    console.log(`⏱️ Debouncing app switch to: ${appInfo.appName} (${this.delay}ms)`);
+    this.pendingApp = appInfo;
+    // Smart OCR scheduling
 
     // Schedule OCR after delay
     this.timeout = setTimeout(() => {
-      if (this.pendingApp && this.processCallback) {
-        console.log(`🎯 Processing settled app: ${this.pendingApp.appName}`);
-        this.processCallback(this.pendingApp);
-      }
-      this.pendingApp = null;
-      this.timeout = null;
+      this.executeOCR(appInfo, reason);
     }, this.delay);
+  }
+
+  executeOCR(appInfo, reason) {
+    if (this.pendingApp && this.processCallback) {
+      // Execute OCR
+      this.lastOCRTime = Date.now();
+      this.lastAppInfo = appInfo;
+      this.processCallback(appInfo, reason);
+    }
+  }
+
+  startFallbackTimer() {
+    // Fallback timer to ensure we don't miss long periods without OCR
+    this.fallbackTimeout = setInterval(() => {
+      const now = Date.now();
+      if (now - this.lastOCRTime > this.fallbackInterval && this.lastAppInfo) {
+        // Fallback OCR trigger
+        this.executeOCR(this.lastAppInfo, 'fallback_timer');
+      }
+    }, this.fallbackInterval);
+  }
+
+  // Called by activity tracker for immediate OCR triggers
+  triggerImmediateOCR(appInfo, reason) {
+    const now = Date.now();
+    if (now - this.lastOCRTime < 3000) { // 3 second immediate minimum
+      // OCR blocked
+      return;
+    }
+
+    // Immediate OCR
+    if (this.timeout) {
+      clearTimeout(this.timeout);
+    }
+    this.executeOCR(appInfo, reason);
   }
 
   cancel() {
@@ -77,6 +125,205 @@ class AppSwitchDebouncer {
       this.timeout = null;
       this.pendingApp = null;
     }
+  }
+
+  stop() {
+    if (this.timeout) {
+      clearTimeout(this.timeout);
+    }
+    if (this.fallbackTimeout) {
+      clearInterval(this.fallbackTimeout);
+    }
+  }
+}
+
+// ----- OCR Batch Manager -----
+class OCRBatchManager {
+  constructor() {
+    this.pendingBatch = [];
+    this.batchTimeout = null;
+    this.batchWindow = 3000; // 3 seconds to collect related OCRs
+    this.maxBatchSize = 5; // Max 5 apps per batch
+    this.currentSequenceId = null;
+    this.pendingOCRJobs = new Map(); // Track pending OCR jobs by job_id
+  }
+
+  async queueOCRJob(jobId, appContext, reason = "unknown") {
+    const now = Date.now();
+
+    // Generate sequence ID if this is a new batch
+    if (this.pendingBatch.length === 0) {
+      this.currentSequenceId = `seq_${now}_${Math.random().toString(36).substr(2, 9)}`;
+    }
+
+    // Create batch item placeholder - will be populated when OCR completes
+    const batchItem = {
+      timestamp: now,
+      appName: appContext.appName,
+      windowTitle: appContext.windowTitle,
+      bundleId: appContext.bundleId,
+      ocrText: [], // Will be populated from WebSocket completion
+      meaningful_context: "", // Will be populated from WebSocket completion
+      sequence: this.pendingBatch.length,
+      trigger_reason: reason,
+      duration_in_app: this.calculateAppDuration(appContext.appName),
+      jobId: jobId, // Track the OCR job ID
+      ocrCompleted: false // Track completion status
+    };
+
+    this.pendingBatch.push(batchItem);
+    this.pendingOCRJobs.set(jobId, batchItem);
+
+    console.log(`📦 Queued OCR job ${jobId} for batch: ${appContext.appName} (${this.pendingBatch.length}/${this.maxBatchSize})`);
+
+    // Reset batch timer
+    if (this.batchTimeout) clearTimeout(this.batchTimeout);
+
+    // Check if we should process batch (when all OCR jobs complete or timeout)
+    this.checkBatchReadiness();
+  }
+
+  onOCRJobComplete(jobId, ocrText, meaningfulContext) {
+    const batchItem = this.pendingOCRJobs.get(jobId);
+    if (batchItem) {
+      // Update batch item with OCR results
+      batchItem.ocrText = ocrText || [];
+      batchItem.meaningful_context = meaningfulContext || "";
+      batchItem.ocrCompleted = true;
+
+      console.log(`✅ OCR job ${jobId} completed for ${batchItem.appName} (${ocrText?.length || 0} lines)`);
+
+      // Remove from pending jobs
+      this.pendingOCRJobs.delete(jobId);
+
+      // Check if batch is ready for processing
+      this.checkBatchReadiness();
+    }
+  }
+
+  checkBatchReadiness() {
+    if (this.pendingBatch.length === 0) return;
+
+    const allCompleted = this.pendingBatch.every(item => item.ocrCompleted);
+    const batchFull = this.pendingBatch.length >= this.maxBatchSize;
+
+    if (allCompleted || batchFull) {
+      console.log(`📦 Batch ready: ${allCompleted ? 'all OCR completed' : 'batch full'} (${this.pendingBatch.length}/${this.maxBatchSize})`);
+      this.processBatch();
+      return;
+    }
+
+    // Set timeout for batch processing if not already set
+    if (!this.batchTimeout) {
+      this.batchTimeout = setTimeout(() => {
+        console.log(`⏰ Batch timeout reached, processing ${this.pendingBatch.length} items`);
+        this.processBatch();
+      }, this.batchWindow);
+    }
+  }
+
+  calculateAppDuration(appName) {
+    // Simple duration tracking - could be enhanced
+    if (!this.lastAppSwitch) return 0;
+    return Date.now() - this.lastAppSwitch;
+  }
+
+  async processBatch() {
+    if (this.pendingBatch.length === 0) return;
+
+    const batch = [...this.pendingBatch];
+    const sequenceId = this.currentSequenceId;
+
+    // Clear current batch and pending jobs
+    this.pendingBatch = [];
+    this.pendingOCRJobs.clear();
+    this.currentSequenceId = null;
+    if (this.batchTimeout) {
+      clearTimeout(this.batchTimeout);
+      this.batchTimeout = null;
+    }
+
+    console.log(`\n${'='.repeat(80)}`);
+    console.log(`📦 PROCESSING OCR BATCH`);
+    console.log(`${'='.repeat(80)}`);
+    console.log(`Sequence ID: ${sequenceId}`);
+    console.log(`Apps in sequence: ${batch.map(b => b.appName).join(' → ')}`);
+    console.log(`Total duration: ${batch[batch.length - 1]?.timestamp - batch[0]?.timestamp}ms`);
+    console.log(`${'='.repeat(80)}\n`);
+
+    try {
+      await this.sendBatchToLLM(batch, sequenceId);
+    } catch (error) {
+      console.error('❌ Error processing batch:', error);
+    }
+  }
+
+  async sendBatchToLLM(batch, sequenceId) {
+    // Prepare sequence metadata
+    const sequenceMetadata = {
+      sequence_id: sequenceId,
+      total_apps: batch.length,
+      sequence_duration: batch[batch.length - 1]?.timestamp - batch[0]?.timestamp,
+      rapid_switching: batch.length > 2 && (batch[batch.length - 1]?.timestamp - batch[0]?.timestamp) < 10000,
+      unique_apps: new Set(batch.map(b => b.appName)).size,
+      trigger_reasons: batch.map(b => b.trigger_reason),
+      workflow_pattern: this.analyzeWorkflowPattern(batch)
+    };
+
+    // Build enhanced request with sequence context
+    const batchRequest = {
+      user_id: currentUserId,
+      session_id: currentSessionId,
+      sequence_metadata: sequenceMetadata,
+      app_sequence: batch,
+      request_type: "batch_analysis",
+      context_signals: {
+        time_of_day: new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening',
+        day_of_week: new Date().getDay() === 0 || new Date().getDay() === 6 ? 'weekend' : 'weekday',
+        rapid_switching: sequenceMetadata.rapid_switching,
+        multi_domain: sequenceMetadata.unique_apps > 2
+      }
+    };
+
+    // Send to AI assistant for LLM processing
+    if (aiAssistant) {
+      // Send batch request to backend - results will come via SSE
+      const result = await aiAssistant.processBatchRequest(batchRequest);
+
+      // The batch results will be received via SSE connection
+      // and processed in aiAssistant.handleSSEEvent()
+      console.log(`📦 Batch submitted for sequence ${sequenceId} - awaiting SSE results`);
+    }
+  }
+
+  analyzeWorkflowPattern(batch) {
+    const apps = batch.map(b => b.appName);
+
+    // Detect common patterns
+    if (apps.includes('Code') || apps.includes('VS Code')) {
+      if (apps.includes('Chrome') || apps.includes('Safari')) {
+        return 'development_research';
+      }
+      return 'coding';
+    }
+
+    if (apps.includes('Terminal') && (apps.includes('Code') || apps.includes('VS Code'))) {
+      return 'development_workflow';
+    }
+
+    if (apps.filter(app => app.includes('Chrome') || app.includes('Safari')).length > 1) {
+      return 'research_browsing';
+    }
+
+    return 'general_workflow';
+  }
+
+  // Force process current batch (useful for app shutdown)
+  forceProcessBatch() {
+    if (this.batchTimeout) {
+      clearTimeout(this.batchTimeout);
+    }
+    this.processBatch();
   }
 }
 
@@ -230,8 +477,8 @@ function createSuggestionsWindow() {
 }
 
 // ----- OCR / AI / Tracking -----
-// Process OCR results and generate AI suggestions (called by debouncer)
-async function processAppOCR(appInfo) {
+// Process OCR results and add to batch (called by scheduler)
+async function processAppOCR(appInfo, reason = "app_switch") {
   try {
     sendToDebug("debug-update", {
       appName: appInfo.appName,
@@ -241,55 +488,27 @@ async function processAppOCR(appInfo) {
       statusType: "waiting",
     });
 
-    // Process OCR with job queue system
+    // Queue OCR job and wait for WebSocket completion
     try {
-      const ocrResults = await ocrManager.captureAndRecognize({
+      const jobId = await ocrManager.captureAndQueueOCR({
         appName: appInfo.appName,
         windowTitle: appInfo.windowTitle,
         bundleId: appInfo.bundleId || appInfo.execName,
         session_id: currentSessionId
       }, currentUserId);
 
-      sendToDebug("debug-update", {
-        ocrLines: Array.isArray(ocrResults) ? ocrResults.length : 0,
-        backendStatus: "OCR completed, generating suggestions…",
-        statusType: "waiting",
-      });
+      if (jobId && ocrBatchManager) {
+        // Queue the job in batch manager
+        ocrBatchManager.queueOCRJob(jobId, {
+          appName: appInfo.appName,
+          windowTitle: appInfo.windowTitle,
+          bundleId: appInfo.bundleId || appInfo.execName
+        }, reason);
 
-      if (Array.isArray(ocrResults) && ocrResults.length > 0) {
-        const enrichedContext = {
-          ...appInfo,
-          userId: currentUserId,
-          ocrResults,
-          recentActivity: recentActivityData,
-          timestamp: Date.now(),
-        };
-
-        try {
-          const suggestions = await aiAssistant.generateSuggestions(
-            enrichedContext,
-            ocrResults
-          );
-
-          sendToDebug("debug-update", {
-            backendStatus: "Success",
-            statusType: "success",
-            suggestions: Array.isArray(suggestions) ? suggestions.length : 0,
-          });
-
-          sendToSuggestions("ocr-results", {
-            appName: appInfo.appName,
-            windowTitle: appInfo.windowTitle,
-            textLines: ocrResults,
-            aiSuggestions: suggestions || [],
-          });
-        } catch (err) {
-          console.error("❌ AI suggestion error:", err);
-          sendToDebug("debug-update", {
-            backendStatus: `Error: ${err?.message || "AI failure"}`,
-            statusType: "error",
-          });
-        }
+        sendToDebug("debug-update", {
+          backendStatus: `OCR job ${jobId} queued for batch processing`,
+          statusType: "waiting",
+        });
       } else {
         sendToDebug("debug-update", {
           backendStatus: "No text detected",
@@ -297,21 +516,21 @@ async function processAppOCR(appInfo) {
         });
       }
     } catch (ocrErr) {
-      console.error("❌ OCR processing error:", ocrErr);
+      // OCR error
       sendToDebug("debug-update", {
         backendStatus: `OCR Error: ${ocrErr?.message || "OCR failure"}`,
         statusType: "error",
       });
     }
   } catch (err) {
-    console.error("Error processing app OCR:", err);
+    // Processing error
   }
 }
 
 // Process keystroke sequences and send to backend
 async function processKeystrokeSequence(sequenceData) {
   try {
-    console.log(`🎹 Processing keystroke sequence: ${sequenceData.keystroke_count} keystrokes over ${sequenceData.sequence_duration}ms`);
+    // Process keystrokes
 
     // Send keystroke data to backend for analysis
     const response = await fetch('http://127.0.0.1:8000/api/ai/keystroke-analysis', {
@@ -331,7 +550,7 @@ async function processKeystrokeSequence(sequenceData) {
 
     if (response.ok) {
       const result = await response.json();
-      console.log(`✅ Keystroke sequence processed: ${result.patterns_detected || 0} patterns detected`);
+      // Keystrokes processed
 
       // Update debug window with keystroke info
       sendToDebug("keystroke-update", {
@@ -341,16 +560,16 @@ async function processKeystrokeSequence(sequenceData) {
         efficiency_score: result.efficiency_score || 'unknown'
       });
     } else {
-      console.error('❌ Failed to process keystroke sequence:', response.statusText);
+      // Keystroke error
     }
   } catch (error) {
-    console.error('❌ Error processing keystroke sequence:', error);
+    // Keystroke processing error
   }
 }
 
 async function createUserSession() {
   try {
-    console.log("🔄 Creating user session...");
+    // Create session
 
     // First check if there's already an active session and end it
     try {
@@ -363,7 +582,7 @@ async function createUserSession() {
 
       if (existingSessionResponse.ok) {
         const existingResult = await existingSessionResponse.json();
-        console.log(`📋 Found existing active session ${existingResult.session_id}, ending it...`);
+        // End existing session
 
         // End the existing session
         try {
@@ -373,7 +592,7 @@ async function createUserSession() {
               "Content-Type": "application/json",
             },
           });
-          console.log(`✅ Ended previous session ${existingResult.session_id}`);
+          // Session ended
         } catch (endError) {
           console.log(`⚠️ Could not end previous session: ${endError.message}`);
         }
@@ -442,6 +661,8 @@ async function createUserSession() {
     });
 
     if (sessionResponse.ok) {
+      const sessionResult = await sessionResponse.json();
+      currentSessionId = sessionResult.session_id; // Use the session ID returned by backend
       console.log(`✅ Successfully created session ${currentSessionId}`);
     } else {
       console.error(`❌ Failed to create session: ${sessionResponse.status} ${sessionResponse.statusText}`);
@@ -461,14 +682,38 @@ function generateUUID() {
 
 function setupPipelines() {
   ocrManager = new OCRManager(suggestionsWindow);
+  ocrBatchManager = new OCRBatchManager();
+
+  // Set up WebSocket handler for OCR completion to trigger batch processing
+  ocrManager.wsManager.onOCRJobComplete((data) => {
+    if (ocrBatchManager) {
+      const meaningfulContext = data.app_context?.meaningful_context || "";
+      ocrBatchManager.onOCRJobComplete(data.job_id, data.text_lines, meaningfulContext);
+    }
+  });
+
+  // Initialize OCR WebSocket connection
+  if (currentUserId && currentSessionId) {
+    ocrManager.connectWebSocket(currentUserId, currentSessionId).then((connected) => {
+      if (connected) {
+        console.log('✅ OCR Manager WebSocket connected');
+      } else {
+        console.log('❌ Failed to connect OCR Manager WebSocket');
+      }
+    });
+  }
+
   aiAssistant = new AIAssistant();
 
   // Initialize keystroke collector
   keystrokeCollector = new EfficientKeystrokeCollector(processKeystrokeSequence);
 
-  // Initialize debouncer
-  appSwitchDebouncer = new AppSwitchDebouncer(500);
-  appSwitchDebouncer.setProcessCallback(processAppOCR);
+  // Initialize smart OCR scheduler
+  smartOCRScheduler = new SmartOCRScheduler(500);
+  smartOCRScheduler.setProcessCallback(processAppOCR);
+
+  // Make scheduler globally available for activity tracker
+  global.smartOCRScheduler = smartOCRScheduler;
 
   activityTracker = new ComprehensiveActivityTracker((activityData) => {
     try {
@@ -481,6 +726,9 @@ function setupPipelines() {
       console.error("Activity tracker callback error:", e);
     }
   }, currentUserId, currentSessionId);
+
+  // Set OCR manager reference for smart triggering
+  activityTracker.ocrManager = ocrManager;
 
   appTracker = new ActiveAppTracker(ocrManager, async (appInfo) => {
     try {
@@ -518,8 +766,8 @@ function setupPipelines() {
         });
       }
 
-      // Schedule debounced OCR processing for valid apps
-      appSwitchDebouncer.scheduleOCR(appInfo);
+      // Schedule smart OCR processing for valid apps
+      smartOCRScheduler.scheduleOCR(appInfo, "app_switch");
 
     } catch (err) {
       console.error("Error in appTracker callback:", err);

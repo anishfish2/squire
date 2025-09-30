@@ -11,14 +11,123 @@ class AIAssistant {
       }
     };
 
+    // Suggestion cooldown system
+    this.suggestionCooldown = {
+      lastSuggestionTime: 0,
+      minCooldownMs: 15000, // 15 seconds minimum between suggestions
+      recentSuggestions: [], // Track recent suggestions for duplicate detection
+      maxRecentSuggestions: 5
+    };
+
     // Set up logging
     this.setupLogging();
 
-    this.log('✅ AI Assistant initialized (backend mode)');
-    this.log('🔗 Backend URL:', this.backendUrl);
+    // AI Assistant initialized
+    // Backend URL set
 
     // Test backend connectivity
     this.testBackendConnection();
+
+    // Initialize SSE connection
+    this.eventSource = null;
+    this.sessionId = null;
+  }
+
+  initializeSSE(sessionId) {
+    this.sessionId = sessionId;
+
+    if (this.eventSource) {
+      this.eventSource.close();
+    }
+
+    try {
+      this.eventSource = new EventSource(`${this.backendUrl}/api/ai/batch-progress/${sessionId}`);
+
+      this.eventSource.onopen = () => {
+        this.log('🔗 SSE connection opened for real-time batch updates');
+      };
+
+      this.eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          this.handleSSEEvent(data);
+        } catch (e) {
+          this.log('❌ Failed to parse SSE event:', e);
+        }
+      };
+
+      this.eventSource.onerror = (error) => {
+        this.log('❌ SSE connection error:', error);
+        // Attempt to reconnect after a delay
+        setTimeout(() => {
+          if (this.sessionId) {
+            this.initializeSSE(this.sessionId);
+          }
+        }, 5000);
+      };
+
+    } catch (error) {
+      this.log('❌ Failed to initialize SSE:', error);
+    }
+  }
+
+  handleSSEEvent(data) {
+    this.log('📡 SSE Event received:', data.type);
+
+    switch (data.type) {
+      case 'connected':
+        this.log('✅ Connected to batch progress stream');
+        break;
+
+      case 'batch_progress':
+        this.log(`📊 Batch progress: ${data.apps_processed}/${data.total_apps} apps processed`);
+        this.log(`📱 Current: ${data.current_app}`);
+
+        if (data.status === 'completed' && data.suggestions) {
+          this.log('🎉 Batch analysis completed with suggestions');
+          this.processBatchSuggestions(data.suggestions, data.sequence_metadata);
+        }
+        break;
+
+      case 'error':
+        this.log('❌ Batch processing error:', data.error);
+        break;
+
+      default:
+        this.log('📡 Unknown SSE event type:', data.type);
+    }
+  }
+
+  processBatchSuggestions(suggestions, sequenceMetadata) {
+    this.log(`🤖 Processing ${suggestions.length} batch suggestions`);
+
+    // Display suggestions using existing notification system
+    suggestions.forEach((suggestion, index) => {
+      setTimeout(() => {
+        if (global.aiOverlayManager && global.aiOverlayManager.showSuggestion) {
+          global.aiOverlayManager.showSuggestion({
+            type: suggestion.type || 'workflow',
+            title: suggestion.title || 'Workflow Suggestion',
+            content: suggestion.content || suggestion.description || 'No description available',
+            confidence_score: suggestion.confidence_score || 0.8,
+            priority: suggestion.priority || 3,
+            context_data: {
+              sequence_id: sequenceMetadata?.sequence_id,
+              batch_processed: true,
+              ...suggestion.context_data
+            }
+          });
+        }
+      }, index * 1000); // Stagger suggestions by 1 second
+    });
+  }
+
+  closeSSE() {
+    if (this.eventSource) {
+      this.eventSource.close();
+      this.eventSource = null;
+      this.log('🔌 SSE connection closed');
+    }
   }
 
   setupLogging() {
@@ -27,35 +136,26 @@ class AIAssistant {
     const os = require('os');
 
     this.logFile = path.join(os.homedir(), 'squire-debug.log');
-    this.log('📝 Logging to:', this.logFile);
+    // Logging configured
   }
 
   log(...args) {
-    const timestamp = new Date().toISOString();
-    const message = `[${timestamp}] ${args.join(' ')}`;
-    console.log(...args);
-
-    try {
-      const fs = require('fs');
-      fs.appendFileSync(this.logFile, message + '\n');
-    } catch (e) {
-      // Ignore file write errors
-    }
+    // Logging disabled for cleaner output
   }
 
   async testBackendConnection() {
     try {
-      this.log('🔍 Testing backend connection...');
+      // Test backend
       const response = await this.makeHttpRequest(`${this.backendUrl}/api/ai/health`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
         }
       });
-      this.log('✅ Backend connection successful:', response.status);
+      // Backend connected
     } catch (error) {
-      this.log('❌ Backend connection failed:', error.message);
-      this.log('   Make sure backend is running at:', this.backendUrl);
+      // Backend connection failed
+      // Check backend
     }
   }
 
@@ -343,12 +443,124 @@ class AIAssistant {
     };
   }
 
+  // Suggestion Cooldown System
+  shouldGenerateSuggestion(ocrResults) {
+    const now = Date.now();
+
+    // Check time-based cooldown
+    if (now - this.suggestionCooldown.lastSuggestionTime < this.suggestionCooldown.minCooldownMs) {
+      // Cooldown active
+      return false;
+    }
+
+    // Check for similar content to avoid duplicate suggestions
+    if (this.isSimilarToRecentContent(ocrResults)) {
+      this.log('🔄 Content too similar to recent OCR, skipping suggestion');
+      return false;
+    }
+
+    return true;
+  }
+
+  isSimilarToRecentContent(currentContent) {
+    if (this.suggestionCooldown.recentSuggestions.length === 0) {
+      return false;
+    }
+
+    // Check if current content is similar to any recent suggestion context
+    for (const recent of this.suggestionCooldown.recentSuggestions) {
+      const similarity = this.calculateContentSimilarity(recent.ocrContent, currentContent);
+      if (similarity > 0.7) { // 70% similarity threshold
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  calculateContentSimilarity(content1, content2) {
+    if (!content1 || !content2 || content1.length === 0 || content2.length === 0) {
+      return 0;
+    }
+
+    // Simple similarity based on shared lines
+    const set1 = new Set(content1.map(line => line.trim().toLowerCase()));
+    const set2 = new Set(content2.map(line => line.trim().toLowerCase()));
+
+    const intersection = new Set([...set1].filter(x => set2.has(x)));
+    const union = new Set([...set1, ...set2]);
+
+    if (union.size === 0) return 1;
+
+    return intersection.size / union.size;
+  }
+
+  trackSuggestion(suggestions, ocrContent) {
+    const now = Date.now();
+
+    // Update last suggestion time
+    this.suggestionCooldown.lastSuggestionTime = now;
+
+    // Add to recent suggestions
+    const suggestionRecord = {
+      timestamp: now,
+      suggestions: suggestions.map(s => ({ type: s.type, title: s.title })),
+      ocrContent: [...ocrContent] // Copy content for similarity checking
+    };
+
+    this.suggestionCooldown.recentSuggestions.push(suggestionRecord);
+
+    // Keep only recent suggestions
+    if (this.suggestionCooldown.recentSuggestions.length > this.suggestionCooldown.maxRecentSuggestions) {
+      this.suggestionCooldown.recentSuggestions.shift();
+    }
+
+    // Track suggestion
+  }
+
+  async processBatchRequest(batchRequest) {
+    console.log("\n" + "="*80);
+    console.log("🔄 PROCESSING BATCH REQUEST");
+    console.log("="*80);
+    console.log(`Sequence ID: ${batchRequest.sequence_metadata.sequence_id}`);
+    console.log(`Apps: ${batchRequest.app_sequence.map(a => a.appName).join(' → ')}`);
+    console.log(`Pattern: ${batchRequest.sequence_metadata.workflow_pattern}`);
+    console.log("="*80 + "\n");
+
+    try {
+      const response = await this.makeHttpRequest(`${this.backendUrl}/api/ai/batch-context`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(batchRequest)
+      });
+
+      const suggestions = response.suggestions || [];
+
+      // Track suggestions for cooldown system
+      if (suggestions.length > 0) {
+        // Use combined OCR content from all apps in batch
+        const combinedOCR = batchRequest.app_sequence.flatMap(app => app.ocrText || []);
+        this.trackSuggestion(suggestions, combinedOCR);
+      }
+
+      return suggestions;
+
+    } catch (error) {
+      console.error('❌ Error processing batch request:', error.message);
+      return [];
+    }
+  }
+
   async generateSuggestions(appInfo, ocrResults) {
-    this.log('🚀 generateSuggestions called with:', JSON.stringify({
-      appName: appInfo.appName,
-      ocrResultsLength: ocrResults.length,
-      backendUrl: this.backendUrl
-    }));
+    // Generate suggestions
+
+    // Check cooldown
+    if (!this.shouldGenerateSuggestion(ocrResults)) {
+      // Suggestion skipped
+      return [];
+    }
 
     try {
       this.updateUserContext(appInfo);
@@ -371,7 +583,7 @@ class AIAssistant {
         activity_context: context.activity_context
       };
 
-      this.log('🤖 About to request AI suggestions and save data to backend...');
+      // Request AI suggestions
       this.log('📊 Context:', JSON.stringify({
         app: appInfo.appName,
         ocrLines: ocrResults.length,
@@ -396,7 +608,15 @@ class AIAssistant {
       if (response.suggestions && response.suggestions.length > 0) {
         console.log('📋 Suggestions:', response.suggestions.map(s => `${s.type}: ${s.title}`));
       }
-      return response.suggestions || [];
+
+      const suggestions = response.suggestions || [];
+
+      // Track suggestions for cooldown system
+      if (suggestions.length > 0) {
+        this.trackSuggestion(suggestions, ocrResults);
+      }
+
+      return suggestions;
 
     } catch (error) {
       console.error('❌ Error requesting AI suggestions from backend:', error.message);

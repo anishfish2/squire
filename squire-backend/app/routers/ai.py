@@ -16,6 +16,8 @@ from app.core.database import get_supabase, execute_query, DatabaseError
 from app.services.ocr_service import PaddleOCRService
 from app.services.ocr_job_manager import OCRJobManager, JobPriority
 from app.services.keystroke_analysis_service import KeystrokeAnalysisService
+from app.services.app_session_service import AppSessionService
+from app.services.websocket_manager import ws_manager
 from app.models.schemas import (
     AIContextRequest,
     AIContextResponse,
@@ -48,7 +50,7 @@ async def get_ocr_job_manager():
     if ocr_job_manager is None:
         ocr_job_manager = OCRJobManager(max_workers=4)
         await ocr_job_manager.start()
-        print("🚀 OCR Job Manager initialized")
+        pass
     return ocr_job_manager
 
 def get_openai_client():
@@ -63,13 +65,13 @@ def get_openai_client():
                 from app.core.config import settings
                 api_key = settings.OPENAI_API_KEY
             except Exception as e:
-                print(f"Error getting API key from settings: {e}")
+                pass
 
         if not api_key:
             raise HTTPException(status_code=500, detail="OpenAI API key not configured")
 
         openai_client = openai.OpenAI(api_key=api_key)
-        print(f"OpenAI client initialized successfully")
+        pass
     return openai_client
 
 # Enhanced Context Analysis Classes
@@ -89,6 +91,103 @@ class MultiLevelContext:
     app: str        # app-level work (minutes to hours)
     session: str    # session theme (hours)
 
+async def extract_meaningful_context(ocr_lines: List[str], app_name: str, window_title: str = "") -> str:
+    """Use LLM to extract only meaningful context from OCR content"""
+    client = get_openai_client()
+    if not ocr_lines or not client or len(ocr_lines) == 0:
+        return ""
+
+    content = '\n'.join(ocr_lines)
+
+    prompt = f"""Extract only meaningful, actionable context from this screen content. Ignore UI elements, menus, and boilerplate.
+
+APP: {app_name}
+WINDOW: {window_title}
+
+SCREEN CONTENT:
+{content}
+
+Extract 1-3 concise bullet points about:
+- Important information the user is viewing (emails, messages, documents)
+- Current work context (code being written, tasks being done, settings being configured)
+- Relevant data or decisions being made
+- Problems or errors the user is encountering
+
+Format as brief bullet points like:
+• User viewing email from mom about birthday party on Friday
+• Figma in prototype mode with mobile layout selected
+• Python error: module 'requests' not found on line 23
+• Writing React component for user authentication
+
+If the screen shows only navigation, empty states, or common UI, return: "• No significant context detected"
+
+Return only the bullet points, nothing else."""
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You extract meaningful context from screen content. Be concise and focus only on actionable information."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            max_tokens=200,
+            temperature=0.2
+        )
+
+        summary = response.choices[0].message.content.strip()
+        return summary
+
+    except Exception as e:
+        return f"• Context extraction failed for {app_name}"
+
+def detect_error_state(ocr_lines: List[str]) -> Dict[str, Any]:
+    """Detect if the current screen shows error states or problematic content"""
+    text = ' '.join(ocr_lines).lower()
+
+    error_keywords = {
+        'syntax_error': ['syntax error', 'syntaxerror', 'invalid syntax', 'unexpected token'],
+        'runtime_error': ['runtime error', 'runtimeerror', 'exception', 'traceback', 'stack trace'],
+        'network_error': ['connection failed', 'network error', 'timeout', 'unable to connect', '404', '500', '503'],
+        'authentication_error': ['unauthorized', 'access denied', 'permission denied', 'login failed', '401', '403'],
+        'validation_error': ['validation error', 'invalid input', 'required field', 'missing parameter'],
+        'build_error': ['build failed', 'compilation error', 'cannot find module', 'module not found'],
+        'database_error': ['database error', 'connection refused', 'table does not exist', 'query failed'],
+        'file_error': ['file not found', 'no such file', 'permission denied', 'cannot read file'],
+        'general_error': ['error', 'failed', 'critical', 'fatal', 'exception', 'warning', 'alert']
+    }
+
+    detected_errors = []
+    error_urgency = 0
+
+    for error_type, keywords in error_keywords.items():
+        for keyword in keywords:
+            if keyword in text:
+                detected_errors.append(error_type)
+                # Higher urgency for critical errors
+                if error_type in ['syntax_error', 'runtime_error', 'build_error']:
+                    error_urgency = max(error_urgency, 3)
+                elif error_type in ['network_error', 'database_error']:
+                    error_urgency = max(error_urgency, 2)
+                else:
+                    error_urgency = max(error_urgency, 1)
+                break
+
+    # Remove duplicates
+    detected_errors = list(set(detected_errors))
+
+    return {
+        "has_errors": len(detected_errors) > 0,
+        "error_types": detected_errors,
+        "error_urgency": error_urgency,  # 0=none, 1=low, 2=medium, 3=high
+        "suggests_debugging": error_urgency >= 2
+    }
+
 
 async def analyze_current_context(ocr_lines: List[str],
                                 app_context: str = "",
@@ -100,9 +199,17 @@ async def analyze_current_context(ocr_lines: List[str],
         return ContextAnalysisResult([], [], "unknown", "work", "general", 0.0)
 
     content = '\n'.join(ocr_lines)
+
+    # Detect error states first
+    error_indicators = detect_error_state(ocr_lines)
+
     history_context = ""
     if recent_activities:
         history_context = f"\nRecent activities: {', '.join(recent_activities[-3:])}"
+
+    error_context = ""
+    if error_indicators["has_errors"]:
+        error_context = f"\nERROR DETECTED: {', '.join(error_indicators['error_types'])} (urgency: {error_indicators['error_urgency']}/3)"
 
     prompt = f"""Analyze what the user is currently doing based on their screen content.
 
@@ -111,11 +218,12 @@ App: {app_context or 'Unknown'}
 Content:
 {content}
 {history_context}
+{error_context}
 
 Return JSON with immediate context:
 {{
   "current_activity": "brief description of immediate activity",
-  "context_type": "work|learning|debugging|creating|researching|communicating|planning|analyzing",
+  "context_type": "work|learning|debugging|creating|researching|communicating|planning|analyzing|error_handling",
   "domain": "general field or subject area",
   "concepts": ["relevant concept1", "concept2"],
   "tools": ["tool1", "tool2"],
@@ -152,7 +260,6 @@ Return JSON with immediate context:
         )
 
     except Exception as e:
-        print(f"Error in context analysis: {e}")
         return ContextAnalysisResult([], [], "unknown", "work", "general", 0.0)
 
 
@@ -234,19 +341,19 @@ Return JSON:
         )
 
     except Exception as e:
-        print(f"Error in multi-level context analysis: {e}")
+        pass
         return MultiLevelContext("unknown", "unknown", "unknown", "unknown")
 
 
 def print_text_lines(text_lines: list[str]):
     if not text_lines:
-        print("No text detected.")
+        pass
         return
 
-    print("\n=== OCR Extracted Text ===")
+    pass
     for idx, line in enumerate(text_lines, start=1):
-        print(f"{idx:02d}. {line}")
-    print("==========================\n")
+        pass
+    pass
 
 
 
@@ -295,9 +402,40 @@ class AISuggestionResponse(BaseModel):
 class SuggestionsResponse(BaseModel):
     suggestions: List[AISuggestionResponse]
 
+class AppSequenceItem(BaseModel):
+    timestamp: int
+    appName: str
+    windowTitle: str = ""
+    bundleId: str = ""
+    ocrText: List[str] = []
+    meaningful_context: str = ""  # Summarized context instead of raw OCR
+    sequence: int
+    trigger_reason: str = "unknown"
+    duration_in_app: int = 0
+
+class SequenceMetadata(BaseModel):
+    sequence_id: str
+    total_apps: int
+    sequence_duration: int
+    rapid_switching: bool
+    unique_apps: int
+    trigger_reasons: List[str]
+    workflow_pattern: str
+
+class BatchContextRequest(BaseModel):
+    user_id: str
+    session_id: str
+    sequence_metadata: SequenceMetadata
+    app_sequence: List[AppSequenceItem]
+    request_type: str = "batch_analysis"
+    context_signals: Dict[str, Any] = {}
+
 
 async def build_enhanced_openai_prompt(request: AISuggestionRequest, user_history: dict = None) -> str:
     """Build the enhanced OpenAI prompt with LLM-driven context analysis"""
+    print("\n" + "="*80)
+    print("🤖 LLM SUGGESTION REQUEST")
+    print("="*80)
 
     ocr_context = ""
     if request.recent_ocr_context.text_lines:
@@ -335,7 +473,7 @@ async def build_enhanced_openai_prompt(request: AISuggestionRequest, user_histor
             ocr_context += f"\n• Overall session: {multi_level_context.session}"
 
         except Exception as e:
-            print(f"Error in enhanced context analysis: {e}")
+            pass
             # Fall back to basic context
 
     # App usage context
@@ -503,6 +641,210 @@ Return JSON (either one suggestion OR empty array):
 
 If no novel suggestion possible, return: {{"suggestions": []}}"""
 
+    print("📝 PROMPT SENT TO LLM:")
+    print("-" * 80)
+    print(prompt)
+    print("-" * 80)
+    print("🔚 END PROMPT")
+    print("="*80 + "\n")
+
+    return prompt
+
+async def build_batch_openai_prompt(request: BatchContextRequest, user_history: dict = None, recent_ocr_context: str = "") -> str:
+    """Build sequence-aware OpenAI prompt with full context integration"""
+    print("\n" + "="*80)
+    print("🔄 BATCH LLM REQUEST")
+    print("="*80)
+
+    # Build detailed sequence context with OCR content
+    sequence_context = ""
+    sequence_context += f"WORKFLOW SEQUENCE ANALYSIS:\n"
+    sequence_context += f"Sequence ID: {request.sequence_metadata.sequence_id}\n"
+    sequence_context += f"Pattern: {request.sequence_metadata.workflow_pattern}\n"
+    sequence_context += f"Duration: {request.sequence_metadata.sequence_duration}ms\n"
+    sequence_context += f"Apps: {request.sequence_metadata.total_apps} unique: {request.sequence_metadata.unique_apps}\n"
+    sequence_context += f"Rapid switching: {request.sequence_metadata.rapid_switching}\n\n"
+
+    # Build detailed app sequence with meaningful context summaries
+    sequence_context += "DETAILED APP TRANSITION SEQUENCE:\n"
+    for i, app in enumerate(request.app_sequence):
+        sequence_context += f"\n{i+1}. {app.appName}"
+        if app.windowTitle:
+            sequence_context += f" - {app.windowTitle}"
+        sequence_context += f" (trigger: {app.trigger_reason})\n"
+
+        # Use pre-extracted meaningful context instead of raw OCR
+        if app.meaningful_context:
+            sequence_context += f"   Context:\n{app.meaningful_context}\n"
+        elif app.ocrText and len(app.ocrText) > 0:
+            sequence_context += f"   Context: • Raw OCR content available but not summarized\n"
+        else:
+            sequence_context += f"   Context: • No content detected\n"
+
+        if app.duration_in_app > 0:
+            sequence_context += f"   Duration: {app.duration_in_app}ms\n"
+
+    # Get enhanced context analysis for the most recent app
+    if request.app_sequence:
+        latest_app = request.app_sequence[-1]
+        try:
+            # Use meaningful_context if available, otherwise fall back to raw OCR
+            context_for_analysis = latest_app.meaningful_context or latest_app.ocrText
+
+            current_context = await analyze_current_context(
+                context_for_analysis,
+                latest_app.appName,
+                None
+            )
+            multi_level_context = await analyze_multi_level_context(
+                context_for_analysis,
+                latest_app.appName,
+                user_history
+            )
+
+            sequence_context += f"\nENHANCED CONTEXT ANALYSIS (Current State):\n"
+            sequence_context += f"• Current activity: {current_context.current_activity}\n"
+            sequence_context += f"• Activity type: {current_context.context_type}\n"
+            sequence_context += f"• Domain: {current_context.domain}\n"
+            if current_context.concepts:
+                sequence_context += f"• Key concepts: {', '.join(current_context.concepts)}\n"
+            if current_context.tools:
+                sequence_context += f"• Tools in use: {', '.join(current_context.tools)}\n"
+
+            sequence_context += f"\nMULTI-LEVEL CONTEXT:\n"
+            sequence_context += f"• Right now: {multi_level_context.micro}\n"
+            sequence_context += f"• Current task: {multi_level_context.task}\n"
+            sequence_context += f"• App session: {multi_level_context.app}\n"
+            sequence_context += f"• Overall session: {multi_level_context.session}\n"
+        except Exception as e:
+            sequence_context += f"\nContext analysis not available\n"
+
+    # Add comprehensive user history context
+    history_context = ""
+    if user_history:
+        # Historical context for personalization
+        historical_context = ""
+
+        # Top apps and usage patterns
+        top_apps = user_history.get("top_apps", [])
+        if top_apps:
+            historical_context += f"Primary apps: {', '.join([app.get('app_name', '') for app in top_apps[:5]])}. "
+
+        # Skill areas and expertise
+        skill_areas = user_history.get("skill_areas", [])
+        if skill_areas:
+            historical_context += f"Areas of expertise: {', '.join(skill_areas[:3])}. "
+
+        # Workflow patterns
+        workflow_patterns = user_history.get('workflow_patterns', {})
+        if workflow_patterns:
+            patterns_text = ', '.join(list(workflow_patterns.keys())[:3])
+            historical_context += f"Common workflow patterns: {patterns_text}. "
+
+        # App transitions for context switching understanding
+        app_transitions = user_history.get("app_transitions", [])
+        if app_transitions:
+            frequent_transitions = [t for t in app_transitions if t.get("frequency", 0) > 2][:3]
+            if frequent_transitions:
+                transition_pairs = [f"{t.get('from_app', '')}->{t.get('to_app', '')}" for t in frequent_transitions]
+                historical_context += f"Frequent app transitions: {', '.join(transition_pairs)}. "
+
+        # Time patterns and session info
+        time_patterns = user_history.get("time_patterns", {})
+        if time_patterns:
+            peak_hours = time_patterns.get("peak_productivity_hours", [])
+            if peak_hours:
+                historical_context += f"Most productive hours: {'-'.join(map(str, peak_hours[:2]))}. "
+
+            session_trends = time_patterns.get("session_trends", [])
+            if session_trends:
+                recent_sessions = len([t for t in session_trends if t.get("date", "")])
+                if recent_sessions > 5:
+                    historical_context += "User has been consistently active recently. "
+
+        # Keystroke efficiency patterns
+        keystroke_patterns = user_history.get("keystroke_patterns", [])
+        if keystroke_patterns:
+            apps_with_patterns = [pattern.get("app_context") for pattern in keystroke_patterns if pattern.get("app_context")]
+            if apps_with_patterns:
+                historical_context += f"Recent keystroke patterns in: {', '.join(set(apps_with_patterns))}. "
+
+            # Check for efficiency indicators
+            for pattern in keystroke_patterns[:2]:
+                efficiency_indicators = pattern.get("efficiency_indicators", {})
+                if efficiency_indicators.get("repetitive_sequences"):
+                    historical_context += f"Detected repetitive keystroke patterns in {pattern.get('app_context', 'recent apps')}. "
+
+        if historical_context:
+            history_context += f"\nUSER HISTORY & PATTERNS:\n{historical_context}\n"
+
+        # Recent suggestions to avoid duplicates
+        recent_suggestions = user_history.get("suggestion_history", [])
+        if recent_suggestions:
+            recent_titles = [s.get("title", "") for s in recent_suggestions[:10]]
+            if recent_titles:
+                history_context += f"\nRECENT SUGGESTIONS (DO NOT REPEAT):\n"
+                for title in recent_titles[:5]:
+                    history_context += f"• {title}\n"
+                history_context += f"IMPORTANT: Provide genuinely new suggestions that differ from recent ones.\n"
+
+    # Build comprehensive prompt with all context
+    prompt = f"""You are an AI assistant analyzing a detailed user workflow sequence to provide highly contextual suggestions.
+
+{sequence_context}
+
+{recent_ocr_context}
+
+{history_context}
+
+CONTEXT SIGNALS:
+• Time: {request.context_signals.get('time_of_day', 'unknown')} on {request.context_signals.get('day_of_week', 'unknown')}
+• Rapid switching: {request.context_signals.get('rapid_switching', False)}
+• Multi-domain: {request.context_signals.get('multi_domain', False)}
+
+ANALYSIS INSTRUCTIONS:
+Analyze this complete workflow sequence using ALL available context:
+1. Screen content from each app in the sequence
+2. User's historical patterns and preferences
+3. Keystroke patterns and tool usage
+4. Knowledge graph insights about user expertise
+5. The progression and timing of app transitions
+6. Multi-level context analysis of current state
+
+Provide 1-3 highly intelligent suggestions that:
+- Leverage the user's known expertise and patterns
+- Address the specific workflow sequence context
+- Consider all visible screen content across apps
+- Help optimize or advance their current multi-app task
+- Are personalized to their demonstrated capabilities
+
+Return JSON format:
+{{
+  "suggestions": [
+    {{
+      "type": "workflow_optimization|task_completion|context_switch|productivity|knowledge_application",
+      "title": "Specific actionable suggestion based on full context",
+      "description": "Detailed explanation leveraging user history and sequence analysis",
+      "confidence": 0.8,
+      "workflow_context": "Why this fits their demonstrated patterns and current sequence",
+      "priority": "high|medium|low",
+      "triggers": ["Specific content or patterns that triggered this suggestion"],
+      "relevant_apps": ["{request.app_sequence[0].appName if request.app_sequence else 'unknown'}"],
+      "time_sensitive": true/false,
+      "personalization_factors": ["User expertise/patterns that informed this suggestion"]
+    }}
+  ]
+}}
+
+If insufficient context for meaningful suggestions, return: {{"suggestions": []}}"""
+
+    print("📝 BATCH PROMPT SENT TO LLM:")
+    print("-" * 80)
+    print(prompt)
+    print("-" * 80)
+    print("🔚 END BATCH PROMPT")
+    print("="*80 + "\n")
+
     return prompt
 
 
@@ -550,28 +892,51 @@ async def get_user_history(user_id: UUID, supabase=None):
                 } for session in recent_sessions[:5]
             ]
 
-        # Get top apps from recent usage metrics (if table exists)
+        # Get top apps from app sessions (last 7 days)
         try:
-            recent_metrics = await execute_query(
-                table="usage_metrics",
+            # Get recent app sessions from last 7 days
+            recent_app_sessions = await execute_query(
+                table="app_sessions",
                 operation="select",
                 filters={"user_id": str(user_id)},
-                order_by="date",
+                order_by="start_time",
                 ascending=False,
-                limit=7
+                limit=100  # Get more sessions to calculate totals
             )
+
+            if recent_app_sessions:
+                app_totals = {}
+                for session in recent_app_sessions:
+                    app_name = session.get("app_name")
+                    duration = session.get("duration_seconds", 0) or 0
+                    minutes = max(1, duration // 60)  # Minimum 1 minute
+
+                    app_totals[app_name] = app_totals.get(app_name, 0) + minutes
+
+                history["top_apps"] = sorted(app_totals.items(), key=lambda x: x[1], reverse=True)[:5]
+            else:
+                # Fallback to usage metrics if app_sessions not available
+                recent_metrics = await execute_query(
+                    table="usage_metrics",
+                    operation="select",
+                    filters={"user_id": str(user_id)},
+                    order_by="date",
+                    ascending=False,
+                    limit=7
+                )
+
+                if recent_metrics:
+                    app_totals = {}
+                    for metric in recent_metrics:
+                        app_usage = metric.get("app_usage", {})
+                        for app, minutes in app_usage.items():
+                            app_totals[app] = app_totals.get(app, 0) + minutes
+
+                    history["top_apps"] = sorted(app_totals.items(), key=lambda x: x[1], reverse=True)[:5]
+
         except Exception as e:
-            print(f"Usage metrics table not found: {e}")
-            recent_metrics = []
-
-        if recent_metrics:
-            app_totals = {}
-            for metric in recent_metrics:
-                app_usage = metric.get("app_usage", {})
-                for app, minutes in app_usage.items():
-                    app_totals[app] = app_totals.get(app, 0) + minutes
-
-            history["top_apps"] = sorted(app_totals.items(), key=lambda x: x[1], reverse=True)[:5]
+            pass
+            history["top_apps"] = []
 
         # Get recent successful suggestions (clicked ones)
         # Note: Need to join with sessions to filter by user_id
@@ -809,13 +1174,13 @@ async def get_user_history(user_id: UUID, supabase=None):
                     } for pattern in keystroke_patterns[:3]  # Last 3 patterns
                 ]
         except Exception as keystroke_error:
-            print(f"Could not fetch keystroke patterns: {keystroke_error}")
+            pass
             history["keystroke_patterns"] = []
 
         return history
 
     except Exception as e:
-        print(f"Error getting user history: {e}")
+        pass
         return {
             "recent_sessions": [],
             "top_apps": [],
@@ -877,7 +1242,7 @@ async def calculate_suggestion_similarity(suggestion1: dict, suggestion2: dict) 
         return min(similarity, 1.0)
 
     except Exception as e:
-        print(f"Error calculating suggestion similarity: {e}")
+        pass
         return 0.0
 
 
@@ -918,18 +1283,18 @@ async def filter_duplicate_suggestions(new_suggestions: List[dict], user_history
                 similarity = await calculate_suggestion_similarity(new_suggestion, recent_suggestion)
 
                 if similarity >= similarity_threshold:
-                    print(f"Filtered duplicate suggestion: '{new_suggestion.get('title', '')}' (similarity: {similarity:.2f})")
+                    pass
                     is_duplicate = True
                     break
 
             if not is_duplicate:
                 filtered_suggestions.append(new_suggestion)
 
-        print(f"Suggestion filtering: {len(new_suggestions)} → {len(filtered_suggestions)} (removed {len(new_suggestions) - len(filtered_suggestions)} duplicates)")
+        pass
         return filtered_suggestions
 
     except Exception as e:
-        print(f"Error filtering duplicate suggestions: {e}")
+        pass
         return new_suggestions
 
 
@@ -967,7 +1332,7 @@ async def ensure_user_profile(user_id: UUID, supabase=None):
         return result[0]["id"] if result else str(user_id)
 
     except Exception as e:
-        print(f"Error ensuring user profile: {e}")
+        pass
         return str(user_id)
 
 
@@ -977,10 +1342,14 @@ async def save_context_data(request: AIContextRequest, suggestions: List[AISugge
         # Ensure user profile exists
         await ensure_user_profile(request.user_id, supabase)
 
-        # Create or get session
+        # Create or get session (removed duplicate device_info that's now in app_sessions)
         session_data = {
             "user_id": str(request.user_id),
-            "device_info": request.current_session,
+            "device_info": {
+                "platform": request.current_session.get("platform", "unknown"),
+                "device_id": request.current_session.get("device_id", "unknown")
+                # ✅ Removed app_usage, session_duration_minutes - now tracked in app_sessions
+            },
             "session_type": SessionType.GENERAL.value
         }
 
@@ -991,17 +1360,44 @@ async def save_context_data(request: AIContextRequest, suggestions: List[AISugge
         )
         session_id = session_result[0]["id"] if session_result else str(uuid4())
 
-        print("Inserted session:", session_result)
+        pass
 
+        # Get enhanced context analysis for app session
+        current_context = await analyze_current_context(
+            request.ocr_text,
+            request.app_name
+        )
 
-        # Save app switch event
+        multi_level_context = await analyze_multi_level_context(
+            request.ocr_text,
+            request.app_name
+        )
+
+        # Create or update app session (consolidated app tracking)
+        app_session_id = await AppSessionService.create_or_update_app_session(
+            user_id=str(request.user_id),
+            session_id=session_id,
+            app_name=request.app_name,
+            window_title=request.window_title,
+            context_type=current_context.context_type,
+            domain=current_context.domain,
+            activity_summary=current_context.current_activity
+        )
+
+        # End any inactive app sessions (cleanup)
+        await AppSessionService.end_inactive_sessions(
+            user_id=str(request.user_id),
+            session_id=session_id,
+            timeout_minutes=5
+        )
+
+        # Save app switch event (now references app session instead of duplicating data)
         app_switch_event = {
             "user_id": str(request.user_id),
             "session_id": session_id,
             "event_type": EventType.APP_SWITCH.value,
             "event_data": {
-                "app_name": request.app_name,
-                "window_title": request.window_title
+                "app_session_id": app_session_id  # ✅ Reference instead of duplicate
             },
             "importance_score": 0.7
         }
@@ -1029,15 +1425,23 @@ async def save_context_data(request: AIContextRequest, suggestions: List[AISugge
             data=ocr_event_data
         )
 
-        # Save OCR event details
+        # Save OCR event details (now references app session)
         ocr_data = {
             "session_id": session_id,
-            "app_name": request.app_name,
-            "window_title": request.window_title,
+            "app_session_id": app_session_id,  # ✅ Reference instead of duplicating app data
             "ocr_text": request.ocr_text,
             "context_data": {
                 "context_signals": request.context_signals,
-                "recent_ocr_context": request.recent_ocr_context
+                "recent_ocr_context": request.recent_ocr_context,
+                "enhanced_context": {
+                    "micro_activity": multi_level_context.micro,
+                    "task_context": multi_level_context.task,
+                    "app_context": multi_level_context.app,
+                    "session_theme": multi_level_context.session,
+                    "concepts": list(current_context.concepts),
+                    "tools": list(current_context.tools),
+                    "confidence_score": current_context.confidence_score
+                }
             }
         }
 
@@ -1048,7 +1452,7 @@ async def save_context_data(request: AIContextRequest, suggestions: List[AISugge
         )
         ocr_event_id = ocr_result[0]["id"] if ocr_result else str(uuid4())
 
-        print("Inserted OCR event:", ocr_result)
+        pass
 
 
         # Save AI suggestions
@@ -1075,7 +1479,7 @@ async def save_context_data(request: AIContextRequest, suggestions: List[AISugge
                 "status": "pending"
             }
 
-            print("Saving AI suggestion to DB:", suggestion_data)
+            pass
 
 
             await execute_query(
@@ -1093,7 +1497,7 @@ async def save_context_data(request: AIContextRequest, suggestions: List[AISugge
         return session_id, ocr_event_id
 
     except Exception as e:
-        print(f"Error saving context data: {e}")
+        pass
         return None, None
 
 
@@ -1219,7 +1623,7 @@ async def update_knowledge_graph(context_request: AIContextRequest, ai_request: 
                         )
                         break
 
-        print("App node data prepared:", app_node_data)
+        pass
 
 
         # Check if node exists (using content to match since name column doesn't exist)
@@ -1231,7 +1635,7 @@ async def update_knowledge_graph(context_request: AIContextRequest, ai_request: 
         existing_node = existing_nodes[0] if existing_nodes else None
 
         if not existing_node:
-            print("Creating new node")
+            pass
             await execute_query(
                 table="knowledge_nodes",
                 operation="insert",
@@ -1242,7 +1646,7 @@ async def update_knowledge_graph(context_request: AIContextRequest, ai_request: 
             updated_content = existing_node.get("content", {})
             updated_content.update(app_node_data["content"])
 
-            print("Updating existing app node:", existing_node)
+            pass
             await execute_query(
                 table="knowledge_nodes",
                 operation="update",
@@ -1280,7 +1684,7 @@ async def update_knowledge_graph(context_request: AIContextRequest, ai_request: 
                 )
                 existing_pattern = existing_patterns[0] if existing_patterns else None
 
-                print("Pattern node data prepared:", pattern_node_data)
+                pass
 
 
                 if not existing_pattern:
@@ -1299,23 +1703,21 @@ async def update_knowledge_graph(context_request: AIContextRequest, ai_request: 
                     )
 
     except Exception as e:
-        print(f"Error updating knowledge graph: {e}")
+        pass
 
 
 async def save_usage_metrics(context_request: AIContextRequest, ai_request: AISuggestionRequest, suggestions: List[AISuggestionResponse], session_id: str, supabase=None):
-    """Save usage metrics for analytics (if table exists)"""
+    """Save usage metrics for analytics - now generates from app_sessions data"""
     try:
-        # Calculate app usage from current session
-        current_session = ai_request.current_session
-        app_usage = current_session.app_usage
+        # Get app usage from app_sessions for today
+        today = datetime.now().date().isoformat()
+        app_usage_summary = await AppSessionService.get_app_usage_summary(
+            user_id=str(context_request.user_id),
+            date=today
+        )
 
-        # Convert to minutes and ensure it's a proper format
-        app_usage_minutes = {}
-        for app, data in app_usage.items():
-            if isinstance(data, dict) and "time_spent" in data:
-                app_usage_minutes[app] = max(1, data["time_spent"] // 60)  # Convert to minutes, minimum 1
-            else:
-                app_usage_minutes[app] = 1
+        # Use app_sessions data instead of duplicating from current_session
+        app_usage_minutes = app_usage_summary.get("app_breakdown", {})
 
         # Calculate efficiency indicators
         stress_indicators = ai_request.context_signals.stress_indicators
@@ -1328,7 +1730,7 @@ async def save_usage_metrics(context_request: AIContextRequest, ai_request: AISu
             "app_usage": app_usage_minutes,
             "suggestions_generated": len(suggestions),
             "suggestions_clicked": 0,  # Would be updated when user clicks
-            "session_duration": current_session.session_duration_minutes,
+            "session_duration": app_usage_summary.get("total_minutes", 0),  # ✅ Use calculated from app_sessions
             "efficiency_indicator": efficiency_indicator
         }
 
@@ -1363,7 +1765,7 @@ async def save_usage_metrics(context_request: AIContextRequest, ai_request: AISu
                     data={
                         "app_usage": updated_app_usage,
                         "suggestions_generated": existing_metrics.get("suggestions_generated", 0) + len(suggestions),
-                        "session_duration": existing_metrics.get("session_duration", 0) + metrics_data["session_duration"],
+                        "session_duration": metrics_data["session_duration"],  # ✅ Use calculated total, don't accumulate
                         "efficiency_indicator": efficiency_indicator
                     },
                     filters={"id": existing_metrics["id"]}
@@ -1376,11 +1778,11 @@ async def save_usage_metrics(context_request: AIContextRequest, ai_request: AISu
                     data=metrics_data
                 )
         except Exception as metrics_error:
-            print(f"Could not save usage metrics (table may not exist): {metrics_error}")
+            pass
             # Continue without metrics - this is not critical
 
     except Exception as e:
-        print(f"Error saving usage metrics: {e}")
+        pass
 
 
 @router.post("/context", response_model=AIContextResponse)
@@ -1389,9 +1791,6 @@ async def save_ai_context(
     supabase=Depends(get_supabase)
 ):
     """Save OCR context and generate AI suggestions with data persistence"""
-    print(f"🔄 AI Context Request received for user: {request.user_id}")
-    print(f"   📱 App: {request.app_name}")
-    print(f"   📝 OCR: {request.ocr_text}")
 
     try:
         # Convert the request to the old format for AI processing
@@ -1428,7 +1827,7 @@ async def save_ai_context(
 
         content = response.choices[0].message.content.strip()
 
-        print("Raw model output:", content)
+        pass
 
 
         # Parse the JSON response
@@ -1454,12 +1853,12 @@ async def save_ai_context(
                 for sug_dict in filtered_suggestions_dicts
             ]
 
-            print("Parsed suggestions JSON:", suggestions_data)
+            pass
 
 
             # If all suggestions were filtered out, generate a fallback
             if not suggestions:
-                print("⚠️ All suggestions were filtered as duplicates, providing fallback")
+                pass
                 suggestions = [AISuggestionResponse(
                     type="reminder",
                     title="Focus Break",
@@ -1480,7 +1879,7 @@ async def save_ai_context(
                 )]
 
         except json.JSONDecodeError as e:
-            print(f"JSON parsing error: {e}")
+            pass
             # Fallback suggestion
             suggestions = [AISuggestionResponse(
                 type="reminder",
@@ -1504,7 +1903,7 @@ async def save_ai_context(
         # Save data to database
         session_id, ocr_event_id = await save_context_data(request, suggestions, ai_request, supabase)
 
-        print(f"✅ Generated {len(suggestions)} suggestions and saved to database")
+        pass
 
         return AIContextResponse(
             session_id=UUID(session_id) if session_id else uuid4(),
@@ -1513,7 +1912,7 @@ async def save_ai_context(
         )
 
     except Exception as e:
-        print(f"❌ AI context error: {str(e)}")
+        pass
 
         # Return minimal response even on error
         return AIContextResponse(
@@ -1560,7 +1959,7 @@ async def generate_detailed_guide(request: dict):
         }
 
     except Exception as e:
-        print(f"Error generating detailed guide: {e}")
+        pass
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1658,7 +2057,7 @@ Return JSON:
 }}"""
 
         # Make OpenAI API call for detailed guide
-        print(f"🔧 Generating detailed implementation guide for: {title}")
+        pass
 
         client = get_openai_client()
         response = client.chat.completions.create(
@@ -1679,7 +2078,7 @@ Return JSON:
         )
 
         content = response.choices[0].message.content.strip()
-        print(f"📋 Generated detailed guide: {len(content)} characters")
+        pass
 
         # Parse JSON response
         import json
@@ -1687,7 +2086,7 @@ Return JSON:
             guide_data = json.loads(content)
             return guide_data.get("guide", {})
         except json.JSONDecodeError as e:
-            print(f"JSON parsing error for guide: {e}")
+            pass
             # Fallback response
             return {
                 "preparation": {"downloads": [], "prerequisites": []},
@@ -1706,7 +2105,7 @@ Return JSON:
             }
 
     except Exception as e:
-        print(f"Error creating detailed guide: {e}")
+        pass
         raise
 
 
@@ -1753,32 +2152,32 @@ async def track_suggestion_click(
                 data=click_event
             )
 
-            print(f"✅ Tracked suggestion click: {suggestion['title']}")
+            pass
 
         return {"status": "success", "message": "Click tracked successfully"}
 
     except Exception as e:
-        print(f"❌ Error tracking suggestion click: {e}")
+        pass
         raise HTTPException(status_code=500, detail="Failed to track suggestion click")
 
 
 @router.post("/suggestions", response_model=SuggestionsResponse)
 async def generate_ai_suggestions(request: AISuggestionRequest):
     """Generate AI suggestions based on user context"""
-    print(f"🔄 AI Suggestion Request received")
-    print(f"   📱 App: {request.current_session.current_app}")
-    print(f"   📝 OCR Lines: {len(request.recent_ocr_context.text_lines)}")
-    print(f"   🧠 App Switching: {request.context_signals.stress_indicators.get('rapid_app_switching', False)}")
+    pass
+    pass
+    pass
+    pass
 
     try:
         client = get_openai_client()
-        print(f"✅ OpenAI client ready")
+        pass
 
         # Build the prompt
         prompt = build_openai_prompt(request)
 
         # Make OpenAI API call
-        print(f"🤖 Making OpenAI API call...")
+        pass
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
@@ -1805,7 +2204,7 @@ async def generate_ai_suggestions(request: AISuggestionRequest):
                 AISuggestionResponse(**suggestion)
                 for suggestion in suggestions_data.get('suggestions', [])
             ]
-            print(f"✅ Generated {len(suggestions)} suggestions successfully")
+            pass
             return SuggestionsResponse(suggestions=suggestions)
         except json.JSONDecodeError as e:
             # If JSON parsing fails, return a fallback suggestion
@@ -1831,8 +2230,8 @@ async def generate_ai_suggestions(request: AISuggestionRequest):
 
     except Exception as e:
         # Log the error (in production, use proper logging)
-        print(f"❌ AI suggestion error: {str(e)}")
-        print(f"   Error type: {type(e).__name__}")
+        pass
+        pass
 
         # Return fallback suggestion
         fallback = AISuggestionResponse(
@@ -1971,7 +2370,7 @@ async def process_ocr(
             priority=job_priority
         )
 
-        print(f"📋 Queued OCR job {job_id}")
+        pass
 
         return {
             "status": "queued",
@@ -1980,7 +2379,7 @@ async def process_ocr(
         }
 
     except Exception as e:
-        print(f"❌ OCR queue error: {e}")
+        pass
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -2011,7 +2410,7 @@ async def get_job_status(job_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"❌ Error getting job status: {e}")
+        pass
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -2028,7 +2427,7 @@ async def get_queue_stats():
         }
 
     except Exception as e:
-        print(f"❌ Error getting queue stats: {e}")
+        pass
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -2045,7 +2444,7 @@ async def queue_ocr_with_context(
 ):
     """Queue OCR job with full application context for intelligent processing"""
 
-    print("user_id" + user_id)
+    pass
     try:
         image_data = await file.read()
         job_manager = await get_ocr_job_manager()
@@ -2083,7 +2482,7 @@ async def queue_ocr_with_context(
             priority=job_priority
         )
 
-        print(f"📋 Queued contextual OCR job {job_id} for {app_name}")
+        pass
 
         return {
             "status": "queued",
@@ -2094,7 +2493,7 @@ async def queue_ocr_with_context(
         }
 
     except Exception as e:
-        print(f"❌ Contextual OCR queue error: {e}")
+        pass
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -2109,7 +2508,7 @@ async def analyze_keystroke_sequence(request: dict):
         if not user_id or not sequence_data:
             raise HTTPException(status_code=400, detail="user_id and sequence_data are required")
 
-        print(f"🎹 Received keystroke analysis request for user {user_id}")
+        pass
 
         # Process the keystroke sequence
         analysis_results = await keystroke_analysis_service.process_keystroke_sequence(
@@ -2134,7 +2533,7 @@ async def analyze_keystroke_sequence(request: dict):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"❌ Error in keystroke analysis endpoint: {e}")
+        pass
         raise HTTPException(status_code=500, detail=f"Keystroke analysis failed: {str(e)}")
 
 
@@ -2154,7 +2553,7 @@ async def get_keystroke_insights(user_id: UUID, app_name: str = None):
         }
 
     except Exception as e:
-        print(f"❌ Error getting keystroke insights: {e}")
+        pass
         raise HTTPException(status_code=500, detail=f"Failed to get insights: {str(e)}")
 
 
@@ -2174,7 +2573,7 @@ async def get_keystroke_patterns(user_id: UUID, limit: int = 10):
         }
 
     except Exception as e:
-        print(f"❌ Error getting keystroke patterns: {e}")
+        pass
         raise HTTPException(status_code=500, detail=f"Failed to get patterns: {str(e)}")
 
 
@@ -2201,3 +2600,178 @@ async def ai_health_check():
             "error": str(e),
             "timestamp": datetime.now().isoformat()
         }
+
+@router.post("/batch-context")
+async def process_batch_context(request: BatchContextRequest):
+    """Process batch OCR context with sequence-aware analysis"""
+    try:
+        # Removed SSE progress tracking - will use WebSocket
+
+        # Get user history for enhanced context
+        supabase = await get_supabase()
+        user_history = await get_user_history(request.user_id, supabase)
+
+        # Debug user history
+        print(f"📊 User history loaded: {len(user_history.get('recent_sessions', []))} sessions, {len(user_history.get('workflow_patterns', {}))} patterns")
+
+        # Get recent OCR context from other sessions
+        recent_ocr_context = ""
+        try:
+            # Get recent OCR events from the last hour for additional context
+            # Note: Using session_id instead of user_id since that's what exists in the table
+            recent_ocr = await execute_query(
+                table="ocr_events",
+                operation="select",
+                filters={"session_id": request.session_id},
+                order_by="created_at",
+                ascending=False,
+                limit=10
+            )
+
+            if recent_ocr:
+                recent_ocr_context = "\nRECENT SCREEN CONTENT (Last Hour):\n"
+                for ocr_event in recent_ocr[:3]:  # Just show last 3 for context
+                    app_name = ocr_event.get('app_context', {}).get('app_name', 'Unknown')
+                    timestamp = ocr_event.get('created_at', '')[:16]  # Just date and time
+                    context = ocr_event.get('meaningful_context', '') or 'No context available'
+                    recent_ocr_context += f"• {timestamp} ({app_name}): {context}\n"
+        except Exception as e:
+            print(f"❌ Failed to get recent OCR context: {e}")
+            recent_ocr_context = ""
+
+        # Emit WebSocket progress notification
+        await ws_manager.emit_batch_progress(request.session_id, {
+            "sequence_id": request.sequence_metadata.sequence_id,
+            "status": "processing",
+            "apps_processed": 0,
+            "total_apps": request.sequence_metadata.total_apps,
+            "current_app": "Analyzing sequence context..."
+        })
+
+        # Build sequence-aware prompt
+        prompt = await build_batch_openai_prompt(request, user_history, recent_ocr_context)
+
+        # Emit progress update - generating AI suggestions
+        await ws_manager.emit_batch_progress(request.session_id, {
+            "sequence_id": request.sequence_metadata.sequence_id,
+            "status": "processing",
+            "apps_processed": request.sequence_metadata.total_apps // 2,
+            "total_apps": request.sequence_metadata.total_apps,
+            "current_app": "Generating AI suggestions..."
+        })
+
+        # Get OpenAI client and process
+        client = get_openai_client()
+        if not client:
+            raise HTTPException(status_code=500, detail="OpenAI client not available")
+
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are an AI assistant that analyzes workflow sequences to provide contextual suggestions. Always respond with valid JSON."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            max_tokens=800,
+            temperature=0.3,
+            response_format={"type": "json_object"}
+        )
+
+        content = response.choices[0].message.content
+        suggestions_data = json.loads(content)
+        suggestions = suggestions_data.get("suggestions", [])
+
+        # Filter duplicate suggestions
+        filtered_suggestions = await filter_duplicate_suggestions(suggestions, user_history)
+
+        # Emit batch completion via WebSocket
+        await ws_manager.emit_batch_complete(request.session_id, {
+            "sequence_id": request.sequence_metadata.sequence_id,
+            "suggestions": filtered_suggestions,
+            "sequence_metadata": request.sequence_metadata.__dict__
+        })
+
+        # Save batch context to database (optional, non-blocking)
+        try:
+            await save_batch_context_data(request, filtered_suggestions, supabase)
+        except:
+            pass  # Don't fail request if DB save fails
+
+        return {
+            "suggestions": filtered_suggestions,
+            "sequence_metadata": request.sequence_metadata,
+            "batch_processed": True
+        }
+
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=500, detail=f"Invalid JSON response from AI: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def save_batch_context_data(request: BatchContextRequest, suggestions: List[Dict], supabase):
+    """Save batch processing context to database"""
+    try:
+        # For now, just save basic sequence info - tables can be created later if needed
+        sequence_data = {
+            "sequence_id": request.sequence_metadata.sequence_id,
+            "user_id": request.user_id,
+            "session_id": request.session_id,
+            "total_apps": request.sequence_metadata.total_apps,
+            "workflow_pattern": request.sequence_metadata.workflow_pattern,
+            "suggestions_count": len(suggestions),
+            "created_at": datetime.now().isoformat()
+        }
+
+        # Try to save to a generic events table or similar
+        await execute_query(
+            table="user_events",
+            operation="insert",
+            data={
+                "user_id": request.user_id,
+                "session_id": request.session_id,
+                "event_type": "batch_analysis",
+                "event_data": sequence_data,
+                "importance_score": 0.7
+            }
+        )
+
+    except Exception as e:
+        pass  # Non-critical database save error
+
+@router.post("/extract-context")
+async def extract_context_endpoint(
+    request: dict
+):
+    """Extract meaningful context from OCR content"""
+    try:
+        ocr_text = request.get("ocr_text", [])
+        app_name = request.get("app_name", "Unknown")
+        window_title = request.get("window_title", "")
+
+        if not ocr_text:
+            return {"meaningful_context": "• No content to analyze"}
+
+        meaningful_context = await extract_meaningful_context(
+            ocr_text,
+            app_name,
+            window_title
+        )
+
+        return {
+            "meaningful_context": meaningful_context,
+            "original_lines": len(ocr_text)
+        }
+
+    except Exception as e:
+        return {
+            "meaningful_context": f"• Context extraction failed: {str(e)}",
+            "original_lines": len(request.get("ocr_text", []))
+        }
+
+
+# Removed SSE endpoints - will use WebSocket for real-time communication
