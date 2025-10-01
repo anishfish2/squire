@@ -10,21 +10,17 @@ class EfficientKeystrokeCollector {
     this.currentContext = null;
     this.isTracking = false;
 
-    // Configuration
     this.maxBufferSize = 100;
-    this.flushInterval = 30000; // 30 seconds
-    this.naturalBreakThreshold = 5000; // 5 seconds of inactivity
-    this.minSequenceLength = 5; // minimum keystrokes before analysis
+    this.flushInterval = 30000;
+    this.naturalBreakThreshold = 5000;
+    this.minSequenceLength = 5;
 
-    // Timers
     this.flushTimer = null;
     this.naturalBreakTimer = null;
 
-    // Global keyboard listener
     this.keyboardListener = null;
 
-    // Track active modifier state
-    this.activeModifiers = new Set(); // Track which modifiers are currently DOWN
+    this.activeModifiers = new Set();
 
     console.log('🎹 EfficientKeystrokeCollector initialized');
   }
@@ -36,14 +32,13 @@ class EfficientKeystrokeCollector {
       return;
     }
 
-    // ✅ set flag before registering listeners
     this.isTracking = true;
 
     try {
       this.registerKeystrokeListeners();
       console.log('✅ Keystroke tracking started');
     } catch (error) {
-      this.isTracking = false; // roll back if init fails
+      this.isTracking = false;
       console.error('❌ Failed to start keystroke tracking:', error);
     }
   }
@@ -60,11 +55,7 @@ class EfficientKeystrokeCollector {
   }
 
   registerKeystrokeListeners() {
-    // Register common key combinations and individual keys
-    // Note: Electron's globalShortcut has limitations, so we'll use a different approach
 
-    // For now, we'll use a more comprehensive approach with native modules
-    // This is a simplified version - in production you'd use a native module
     this.setupKeystrokeCapture();
   }
 
@@ -85,7 +76,6 @@ class EfficientKeystrokeCollector {
       this.lastPhysicalByKey = new Map();
       this.lastAcceptedByKey = new Map();
 
-      // Timing windows
       const SCAN_DUP_WINDOW_MS = 35;
       const KEY_MIN_SPACING_MS = 5;
 
@@ -94,10 +84,9 @@ class EfficientKeystrokeCollector {
 
         const now = Date.now();
         let key = e.name || "";
-        const state = e.state; // "DOWN" or "UP"
+        const state = e.state;
 
 
-        // Normalize mouse clicks
         if (key.startsWith("MOUSE")) {
           
           this.captureKeystroke(key, [], Date.now(), state);
@@ -105,24 +94,20 @@ class EfficientKeystrokeCollector {
           return;
         }
 
-        // Normalize special keys
         if (key === "Space") key = "SPACE";
         if (key === "Return" || key === "Enter") key = "ENTER";
         if (key === "Backspace") key = "BACKSPACE";
         if (key === "Tab") key = "TAB";
 
-        // Normalize modifier keys
         if (key === "LEFT CTRL" || key === "RIGHT CTRL") key = "CTRL";
         if (key === "LEFT SHIFT" || key === "RIGHT SHIFT") key = "SHIFT";
         if (key === "LEFT META" || key === "RIGHT META") key = "CMD";
         if (key === "LEFT ALT" || key === "RIGHT ALT") key = "ALT";
 
-        // Normalize printable characters
         if (key.length === 1) {
           key = e.shift ? key.toUpperCase() : key.toLowerCase();
         }
 
-        // Track modifier state changes
         if (["CTRL", "SHIFT", "CMD", "ALT"].includes(key)) {
           if (state === "DOWN") {
             this.activeModifiers.add(key);
@@ -131,12 +116,10 @@ class EfficientKeystrokeCollector {
           }
         }
 
-        // Get current active modifiers for this keystroke
         const currentModifiers = Array.from(this.activeModifiers);
         const hasScan = Number.isInteger(e.scanCode) && e.scanCode > 0;
 
         if (state === "DOWN" && hasScan) {
-          // Deduplicate only DOWN events
           const lastScanT = this.lastPhysicalByScan.get(e.scanCode) || 0;
           if (now - lastScanT < SCAN_DUP_WINDOW_MS) return;
 
@@ -148,7 +131,6 @@ class EfficientKeystrokeCollector {
           this.lastAcceptedByKey.set(key, now);
         }
 
-        // Always capture (both DOWN and UP)
         this.captureKeystroke(key, currentModifiers, now, state);
       });
 
@@ -195,17 +177,14 @@ class EfficientKeystrokeCollector {
 
     return {
       timestamp: Date.now(),
-      // This would be filled by app tracker
       app_name: this.currentContext?.app_name || 'Unknown',
       window_title: this.currentContext?.window_title || ''
     };
   }
 
   updateContext(context) {
-    // Called by main process when app context changes
     this.currentContext = context;
 
-    // Context change might trigger a flush to segment sequences by app
     if (this.buffer.length > this.minSequenceLength) {
       this.flushBuffer('context_change');
     }
@@ -222,22 +201,18 @@ class EfficientKeystrokeCollector {
 
   flushBuffer(reason = 'normal') {
     if (this.buffer.length < this.minSequenceLength) {
-      // Not enough data to analyze, just reset
       this.resetBuffer();
       return;
     }
 
     console.log(`📤 Flushing keystroke buffer: ${this.buffer.length} keystrokes (reason: ${reason})`);
 
-    // Compress the sequence
     const compressedSequence = this.compressSequence(this.buffer);
 
-    // Send to callback for backend processing
     if (this.onSequenceReady) {
       this.onSequenceReady(compressedSequence);
     }
 
-    // Reset buffer
     this.resetBuffer();
   }
 
@@ -265,19 +240,16 @@ class EfficientKeystrokeCollector {
       sequence_duration: buffer[buffer.length - 1].timing,
       keystroke_count: buffer.length,
 
-      // Efficient storage arrays
       keys,
       timings,
       modifiers,
       states,
-      down_keys, // <-- NEW
+      down_keys,
 
-      // Analyzed patterns
       patterns,
       metadata,
       context_data: contextData,
 
-      // Processing info
       flush_reason: 'normal',
       created_at: new Date().toISOString()
     };
@@ -285,13 +257,10 @@ class EfficientKeystrokeCollector {
 
 
   detectPatterns(buffer) {
-    // Detect repetitive patterns
     const repetitivePatterns = this.findRepetitiveSequences(buffer);
 
-    // Detect timing patterns
     const timingPatterns = this.analyzeTimingPatterns(buffer);
 
-    // Detect modifier usage patterns
     const modifierPatterns = this.analyzeModifierUsage(buffer);
 
     return {
@@ -307,14 +276,13 @@ class EfficientKeystrokeCollector {
     const sequences = [];
     const keys = buffer.map(k => k.key);
 
-    // Find sequences of the same key repeated
     let currentSequence = { key: keys[0], count: 1, start_index: 0 };
 
     for (let i = 1; i < keys.length; i++) {
       if (keys[i] === currentSequence.key) {
         currentSequence.count++;
       } else {
-        if (currentSequence.count >= 3) { // Only store if repeated 3+ times
+        if (currentSequence.count >= 3) {
           sequences.push({
             key: currentSequence.key,
             repetitions: currentSequence.count,
@@ -326,7 +294,6 @@ class EfficientKeystrokeCollector {
       }
     }
 
-    // Check final sequence
     if (currentSequence.count >= 3) {
       sequences.push({
         key: currentSequence.key,
@@ -384,7 +351,7 @@ class EfficientKeystrokeCollector {
       if (navigationKeys.includes(keystroke.key)) {
         currentNav.push(keystroke);
       } else {
-        if (currentNav.length >= 2) { // 2+ navigation keys in sequence
+        if (currentNav.length >= 2) {
           navigationSequences.push({
             keys: currentNav.map(k => k.key),
             duration: currentNav[currentNav.length - 1].timing - currentNav[0].timing,
@@ -401,7 +368,6 @@ class EfficientKeystrokeCollector {
   detectShortcutPatterns(buffer) {
     return buffer
       .filter(keystroke => {
-        // Only DOWN events and must have actual modifier keys
         return keystroke.state === "DOWN" &&
                keystroke.modifiers.length > 0 &&
                !["CTRL", "SHIFT", "CMD", "ALT"].includes(keystroke.key);
@@ -463,7 +429,6 @@ class EfficientKeystrokeCollector {
   }
 
   aggregateContextData(buffer) {
-    // Get unique contexts in this sequence
     const contexts = buffer.map(k => k.context);
     const uniqueApps = new Set(contexts.map(c => c.app_name));
 
@@ -511,7 +476,7 @@ class EfficientKeystrokeCollector {
     this.buffer = [];
     this.sequenceStart = null;
     this.lastKeystroke = null;
-    this.activeModifiers.clear(); // Clear active modifier state
+    this.activeModifiers.clear();
     this.clearTimers();
   }
 
@@ -555,7 +520,6 @@ class EfficientKeystrokeCollector {
   }
 
   unregisterKeystrokeListeners() {
-    // Cleanup keyboard listener
     if (this.keyboardListener) {
       try {
         this.keyboardListener.kill();
@@ -566,15 +530,12 @@ class EfficientKeystrokeCollector {
       }
     }
 
-    // Unregister all global shortcuts (if any were registered)
     try {
       globalShortcut.unregisterAll();
     } catch (e) {
-      // Ignore errors if no shortcuts were registered
     }
   }
 
-  // Public methods for external control
   pause() {
     this.isTracking = false;
     console.log('⏸️ Keystroke tracking paused');

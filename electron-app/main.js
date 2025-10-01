@@ -1,9 +1,8 @@
-// main.js
 const { app, BrowserWindow, screen, ipcMain, Menu, dialog } = require("electron");
 const path = require("path");
 
 const OCRManager = require("./ocr-manager");
-const ActiveAppTracker = require("./app-tracker"); // ✅ now uses @paymoapp/active-window
+const ActiveAppTracker = require("./app-tracker");
 const ComprehensiveActivityTracker = require("./activity-tracker");
 const AIAssistant = require("./ai-assistant");
 const EfficientKeystrokeCollector = require("./keystroke-collector");
@@ -17,14 +16,13 @@ let activityTracker;
 let aiAssistant;
 let keystrokeCollector;
 let recentActivityData = null;
-let skipNextOCR = false; // For user-initiated focus handling
-let smartOCRScheduler = null; // For smart OCR scheduling
-let ocrBatchManager = null; // For OCR result batching
+let skipNextOCR = false;
+let smartOCRScheduler = null;
+let ocrBatchManager = null;
 
 let currentUserId = "550e8400-e29b-41d4-a716-446655440000";
 let currentSessionId = null;
 
-// ----- Helper Functions -----
 function sendToDebug(channel, data) {
   if (debugWindow && !debugWindow.isDestroyed()) {
     debugWindow.webContents.send(channel, data);
@@ -37,7 +35,6 @@ function sendToSuggestions(channel, data) {
   }
 }
 
-// ----- Smart OCR Scheduler -----
 class SmartOCRScheduler {
   constructor(delay = 500) {
     this.delay = delay;
@@ -46,11 +43,10 @@ class SmartOCRScheduler {
     this.pendingApp = null;
     this.processCallback = null;
     this.lastOCRTime = 0;
-    this.minTimeBetweenOCR = 5000; // 5 seconds minimum
-    this.fallbackInterval = 30000; // 30 seconds fallback
+    this.minTimeBetweenOCR = 5000;
+    this.fallbackInterval = 30000;
     this.lastAppInfo = null;
 
-    // Start fallback timer
     this.startFallbackTimer();
   }
 
@@ -59,15 +55,12 @@ class SmartOCRScheduler {
   }
 
   scheduleOCR(appInfo, reason = "app_switch") {
-    // Cancel previous pending OCR
     if (this.timeout) {
       clearTimeout(this.timeout);
     }
 
-    // Check if we should skip due to time constraints
     const now = Date.now();
     if (now - this.lastOCRTime < this.minTimeBetweenOCR) {
-      // OCR rate limiting
       this.pendingApp = appInfo;
       this.timeout = setTimeout(() => {
         this.executeOCR(appInfo, reason);
@@ -76,9 +69,7 @@ class SmartOCRScheduler {
     }
 
     this.pendingApp = appInfo;
-    // Smart OCR scheduling
 
-    // Schedule OCR after delay
     this.timeout = setTimeout(() => {
       this.executeOCR(appInfo, reason);
     }, this.delay);
@@ -86,7 +77,6 @@ class SmartOCRScheduler {
 
   executeOCR(appInfo, reason) {
     if (this.pendingApp && this.processCallback) {
-      // Execute OCR
       this.lastOCRTime = Date.now();
       this.lastAppInfo = appInfo;
       this.processCallback(appInfo, reason);
@@ -94,25 +84,20 @@ class SmartOCRScheduler {
   }
 
   startFallbackTimer() {
-    // Fallback timer to ensure we don't miss long periods without OCR
     this.fallbackTimeout = setInterval(() => {
       const now = Date.now();
       if (now - this.lastOCRTime > this.fallbackInterval && this.lastAppInfo) {
-        // Fallback OCR trigger
         this.executeOCR(this.lastAppInfo, 'fallback_timer');
       }
     }, this.fallbackInterval);
   }
 
-  // Called by activity tracker for immediate OCR triggers
   triggerImmediateOCR(appInfo, reason) {
     const now = Date.now();
-    if (now - this.lastOCRTime < 3000) { // 3 second immediate minimum
-      // OCR blocked
+    if (now - this.lastOCRTime < 3000) {
       return;
     }
 
-    // Immediate OCR
     if (this.timeout) {
       clearTimeout(this.timeout);
     }
@@ -137,38 +122,35 @@ class SmartOCRScheduler {
   }
 }
 
-// ----- OCR Batch Manager -----
 class OCRBatchManager {
   constructor() {
     this.pendingBatch = [];
     this.batchTimeout = null;
-    this.batchWindow = 10000; // 10 seconds to wait for OCR completion
-    this.maxBatchSize = 5; // Max 5 apps per batch
+    this.batchWindow = 30000;
+    this.maxBatchSize = 5;
     this.currentSequenceId = null;
-    this.pendingOCRJobs = new Map(); // Track pending OCR jobs by job_id
+    this.pendingOCRJobs = new Map();
   }
 
   async queueOCRJob(jobId, appContext, reason = "unknown") {
     const now = Date.now();
 
-    // Generate sequence ID if this is a new batch
     if (this.pendingBatch.length === 0) {
       this.currentSequenceId = `seq_${now}_${Math.random().toString(36).substr(2, 9)}`;
     }
 
-    // Create batch item placeholder - will be populated when OCR completes
     const batchItem = {
       timestamp: now,
       appName: appContext.appName,
       windowTitle: appContext.windowTitle,
       bundleId: appContext.bundleId,
-      ocrText: [], // Will be populated from WebSocket completion
-      meaningful_context: "", // Will be populated from WebSocket completion
+      ocrText: [],
+      meaningful_context: "",
       sequence: this.pendingBatch.length,
       trigger_reason: reason,
       duration_in_app: this.calculateAppDuration(appContext.appName),
-      jobId: jobId, // Track the OCR job ID
-      ocrCompleted: false // Track completion status
+      jobId: jobId,
+      ocrCompleted: false
     };
 
     this.pendingBatch.push(batchItem);
@@ -176,27 +158,25 @@ class OCRBatchManager {
 
     console.log(`📦 Queued OCR job ${jobId} for batch: ${appContext.appName} (${this.pendingBatch.length}/${this.maxBatchSize})`);
 
-    // Reset batch timer
     if (this.batchTimeout) clearTimeout(this.batchTimeout);
 
-    // Check if we should process batch (when all OCR jobs complete or timeout)
     this.checkBatchReadiness();
   }
 
-  onOCRJobComplete(jobId, ocrText, meaningfulContext) {
+  onOCRJobComplete(jobId, ocrText, meaningfulContext, appContext, extractedEntities) {
     const batchItem = this.pendingOCRJobs.get(jobId);
     if (batchItem) {
-      // Update batch item with OCR results
       batchItem.ocrText = ocrText || [];
       batchItem.meaningful_context = meaningfulContext || "";
+      batchItem.application_type = appContext?.application_type || "";
+      batchItem.interaction_context = appContext?.interaction_context || "";
+      batchItem.extracted_entities = extractedEntities || [];
       batchItem.ocrCompleted = true;
 
       console.log(`✅ OCR job ${jobId} completed for ${batchItem.appName} (${ocrText?.length || 0} lines)`);
 
-      // Remove from pending jobs
       this.pendingOCRJobs.delete(jobId);
 
-      // Check if batch is ready for processing
       this.checkBatchReadiness();
     }
   }
@@ -207,23 +187,42 @@ class OCRBatchManager {
     const allCompleted = this.pendingBatch.every(item => item.ocrCompleted);
     const batchFull = this.pendingBatch.length >= this.maxBatchSize;
 
-    if (allCompleted || batchFull) {
-      console.log(`📦 Batch ready: ${allCompleted ? 'all OCR completed' : 'batch full'} (${this.pendingBatch.length}/${this.maxBatchSize})`);
+    if (allCompleted) {
+      console.log(`📦 Batch ready: all OCR completed (${this.pendingBatch.length}/${this.maxBatchSize})`);
       this.processBatch();
       return;
     }
 
-    // Set timeout for batch processing if not already set
+    if (batchFull) {
+      const completedCount = this.pendingBatch.filter(item => item.ocrCompleted).length;
+      const completionRate = completedCount / this.pendingBatch.length;
+
+      if (completionRate >= 0.5) {
+        console.log(`📦 Batch ready: batch full with ${completionRate * 100}% OCR completed (${completedCount}/${this.pendingBatch.length})`);
+        this.processBatch();
+        return;
+      } else {
+        console.log(`⏳ Batch full but waiting for more OCR: ${completedCount}/${this.pendingBatch.length} completed`);
+      }
+    }
+
     if (!this.batchTimeout) {
       this.batchTimeout = setTimeout(() => {
-        console.log(`⏰ Batch timeout reached, processing ${this.pendingBatch.length} items`);
-        this.processBatch();
+        const completedCount = this.pendingBatch.filter(item => item.ocrCompleted).length;
+        console.log(`⏰ Batch timeout reached: ${completedCount}/${this.pendingBatch.length} OCR jobs completed`);
+
+        if (completedCount > 0) {
+          this.processBatch();
+        } else {
+          console.log(`⚠️ No OCR completed yet, extending timeout...`);
+          this.batchTimeout = null;
+          this.checkBatchReadiness();
+        }
       }, this.batchWindow);
     }
   }
 
   calculateAppDuration(appName) {
-    // Simple duration tracking - could be enhanced
     if (!this.lastAppSwitch) return 0;
     return Date.now() - this.lastAppSwitch;
   }
@@ -234,7 +233,6 @@ class OCRBatchManager {
     const batch = [...this.pendingBatch];
     const sequenceId = this.currentSequenceId;
 
-    // Clear current batch and pending jobs
     this.pendingBatch = [];
     this.pendingOCRJobs.clear();
     this.currentSequenceId = null;
@@ -259,7 +257,6 @@ class OCRBatchManager {
   }
 
   async sendBatchToLLM(batch, sequenceId) {
-    // Prepare sequence metadata
     const sequenceMetadata = {
       sequence_id: sequenceId,
       total_apps: batch.length,
@@ -270,7 +267,6 @@ class OCRBatchManager {
       workflow_pattern: this.analyzeWorkflowPattern(batch)
     };
 
-    // Build enhanced request with sequence context
     const batchRequest = {
       user_id: currentUserId,
       session_id: currentSessionId,
@@ -285,13 +281,9 @@ class OCRBatchManager {
       }
     };
 
-    // Send to AI assistant for LLM processing
     if (aiAssistant) {
-      // Send batch request to backend - results will come via SSE
       const result = await aiAssistant.processBatchRequest(batchRequest);
 
-      // The batch results will be received via SSE connection
-      // and processed in aiAssistant.handleSSEEvent()
       console.log(`📦 Batch submitted for sequence ${sequenceId} - awaiting SSE results`);
     }
   }
@@ -299,7 +291,6 @@ class OCRBatchManager {
   analyzeWorkflowPattern(batch) {
     const apps = batch.map(b => b.appName);
 
-    // Detect common patterns
     if (apps.includes('Code') || apps.includes('VS Code')) {
       if (apps.includes('Chrome') || apps.includes('Safari')) {
         return 'development_research';
@@ -318,7 +309,6 @@ class OCRBatchManager {
     return 'general_workflow';
   }
 
-  // Force process current batch (useful for app shutdown)
   forceProcessBatch() {
     if (this.batchTimeout) {
       clearTimeout(this.batchTimeout);
@@ -327,21 +317,19 @@ class OCRBatchManager {
   }
 }
 
-// ----- Window Creation -----
 function createMainWindow() {
   mainWindow = new BrowserWindow({
     width: 400,
     height: 300,
-    show: false,           // Start hidden
-    skipTaskbar: false,    // DO show in taskbar/dock
-    focusable: true,       // CAN be focused when user clicks
+    show: false,
+    skipTaskbar: false,
+    focusable: true,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
     },
   });
 
-  // Load a simple status page
   mainWindow.loadFile(path.join(__dirname, "debug.html"));
 
   mainWindow.on("closed", () => {
@@ -363,7 +351,7 @@ function createDebugWindow() {
     resizable: true,
     movable: true,
     skipTaskbar: true,
-    focusable: false,      // Can't steal focus
+    focusable: false,
     visibleOnAllWorkspaces: true,
     fullscreenable: false,
     webPreferences: {
@@ -374,17 +362,14 @@ function createDebugWindow() {
 
   debugWindow.loadFile("debug.html");
 
-  // Stay on top, even fullscreen
   debugWindow.setAlwaysOnTop(true, "screen-saver");
   debugWindow.setVisibleOnAllWorkspaces(true, {
     visibleOnFullScreen: true,
     skipTransformProcessType: true
   });
 
-  // Default click-through
   debugWindow.setIgnoreMouseEvents(true, { forward: true });
 
-  // Allow interaction on hover
   debugWindow.webContents.on("before-input-event", (event, input) => {
     if (input.type === "mouseMove") {
       debugWindow.setIgnoreMouseEvents(false);
@@ -398,7 +383,6 @@ function createDebugWindow() {
     debugWindow = null;
   });
 
-  // User-initiated focus handling for debug window
   debugWindow.webContents.on('did-finish-load', () => {
     debugWindow.webContents.executeJavaScript(`
       document.addEventListener('click', () => {
@@ -426,7 +410,7 @@ function createSuggestionsWindow() {
     resizable: true,
     movable: true,
     skipTaskbar: true,
-    focusable: false,      // Can't steal focus
+    focusable: false,
     visibleOnAllWorkspaces: true,
     fullscreenable: false,
     webPreferences: {
@@ -437,16 +421,13 @@ function createSuggestionsWindow() {
 
   suggestionsWindow.loadFile("suggestions.html");
 
-  // Stay on top, even fullscreen
   suggestionsWindow.setAlwaysOnTop(true, "screen-saver");
   suggestionsWindow.setVisibleOnAllWorkspaces(true, {
     visibleOnFullScreen: true,
     skipTransformProcessType: true
   });
-  // Default click-through
   suggestionsWindow.setIgnoreMouseEvents(true, { forward: true });
 
-  // Allow interaction on hover
   suggestionsWindow.webContents.on("before-input-event", (event, input) => {
     if (input.type === "mouseMove") {
       suggestionsWindow.setIgnoreMouseEvents(false);
@@ -460,7 +441,6 @@ function createSuggestionsWindow() {
     suggestionsWindow = null;
   });
 
-  // User-initiated focus handling for suggestions window
   suggestionsWindow.webContents.on('did-finish-load', () => {
     suggestionsWindow.webContents.executeJavaScript(`
       document.addEventListener('click', () => {
@@ -476,8 +456,6 @@ function createSuggestionsWindow() {
   return suggestionsWindow;
 }
 
-// ----- OCR / AI / Tracking -----
-// Process OCR results and add to batch (called by scheduler)
 async function processAppOCR(appInfo, reason = "app_switch") {
   try {
     sendToDebug("debug-update", {
@@ -488,7 +466,6 @@ async function processAppOCR(appInfo, reason = "app_switch") {
       statusType: "waiting",
     });
 
-    // Queue OCR job and wait for WebSocket completion
     try {
       const jobId = await ocrManager.captureAndQueueOCR({
         appName: appInfo.appName,
@@ -498,7 +475,6 @@ async function processAppOCR(appInfo, reason = "app_switch") {
       }, currentUserId);
 
       if (jobId && ocrBatchManager) {
-        // Queue the job in batch manager
         ocrBatchManager.queueOCRJob(jobId, {
           appName: appInfo.appName,
           windowTitle: appInfo.windowTitle,
@@ -516,24 +492,19 @@ async function processAppOCR(appInfo, reason = "app_switch") {
         });
       }
     } catch (ocrErr) {
-      // OCR error
       sendToDebug("debug-update", {
         backendStatus: `OCR Error: ${ocrErr?.message || "OCR failure"}`,
         statusType: "error",
       });
     }
   } catch (err) {
-    // Processing error
   }
 }
 
-// Process keystroke sequences and send to backend
 async function processKeystrokeSequence(sequenceData) {
   try {
-    // Process keystrokes
 
-    // Send keystroke data to backend for analysis
-    const response = await fetch('http://127.0.0.1:8000/api/ai/keystroke-analysis', {
+    const response = await fetch('http:
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -550,9 +521,7 @@ async function processKeystrokeSequence(sequenceData) {
 
     if (response.ok) {
       const result = await response.json();
-      // Keystrokes processed
 
-      // Update debug window with keystroke info
       sendToDebug("keystroke-update", {
         sequenceId: sequenceData.sequence_id,
         keystrokeCount: sequenceData.keystroke_count,
@@ -560,20 +529,16 @@ async function processKeystrokeSequence(sequenceData) {
         efficiency_score: result.efficiency_score || 'unknown'
       });
     } else {
-      // Keystroke error
     }
   } catch (error) {
-    // Keystroke processing error
   }
 }
 
 async function createUserSession() {
   try {
-    // Create session
 
-    // First check if there's already an active session and end it
     try {
-      const existingSessionResponse = await fetch(`http://127.0.0.1:8000/api/activity/current-session/${currentUserId}`, {
+      const existingSessionResponse = await fetch(`http:
         method: "GET",
         headers: {
           "Content-Type": "application/json",
@@ -582,17 +547,14 @@ async function createUserSession() {
 
       if (existingSessionResponse.ok) {
         const existingResult = await existingSessionResponse.json();
-        // End existing session
 
-        // End the existing session
         try {
-          await fetch(`http://127.0.0.1:8000/api/activity/end-session/${existingResult.session_id}`, {
+          await fetch(`http:
             method: "POST",
             headers: {
               "Content-Type": "application/json",
             },
           });
-          // Session ended
         } catch (endError) {
           console.log(`⚠️ Could not end previous session: ${endError.message}`);
         }
@@ -601,10 +563,8 @@ async function createUserSession() {
       console.log("No existing session found, creating new one...");
     }
 
-    // Generate session ID
     currentSessionId = generateUUID();
 
-    // First ensure user profile exists
     try {
       const profileData = {
         id: currentUserId,
@@ -617,7 +577,7 @@ async function createUserSession() {
         timezone: "UTC"
       };
 
-      const profileResponse = await fetch("http://127.0.0.1:8000/api/activity/profiles", {
+      const profileResponse = await fetch("http:
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -634,10 +594,8 @@ async function createUserSession() {
         console.error(`❌ Profile error details: ${errorText}`);
       }
     } catch (profileError) {
-      // Profile might already exist, continue with session creation
     }
 
-    // Create new session
     const sessionData = {
       id: currentSessionId,
       user_id: currentUserId,
@@ -652,7 +610,7 @@ async function createUserSession() {
       updated_at: new Date().toISOString()
     };
 
-    const sessionResponse = await fetch("http://127.0.0.1:8000/api/activity/sessions", {
+    const sessionResponse = await fetch("http:
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -662,7 +620,7 @@ async function createUserSession() {
 
     if (sessionResponse.ok) {
       const sessionResult = await sessionResponse.json();
-      currentSessionId = sessionResult.session_id; // Use the session ID returned by backend
+      currentSessionId = sessionResult.session_id;
       console.log(`✅ Successfully created session ${currentSessionId}`);
     } else {
       console.error(`❌ Failed to create session: ${sessionResponse.status} ${sessionResponse.statusText}`);
@@ -684,15 +642,19 @@ function setupPipelines() {
   ocrManager = new OCRManager(suggestionsWindow);
   ocrBatchManager = new OCRBatchManager();
 
-  // Set up WebSocket handler for OCR completion to trigger batch processing
   ocrManager.wsManager.onOCRJobComplete((data) => {
     if (ocrBatchManager) {
       const meaningfulContext = data.app_context?.meaningful_context || "";
-      ocrBatchManager.onOCRJobComplete(data.job_id, data.text_lines, meaningfulContext);
+      ocrBatchManager.onOCRJobComplete(
+        data.job_id,
+        data.text_lines,
+        meaningfulContext,
+        data.app_context,
+        data.extracted_entities
+      );
     }
   });
 
-  // Initialize OCR WebSocket connection
   if (currentUserId && currentSessionId) {
     ocrManager.connectWebSocket(currentUserId, currentSessionId).then((connected) => {
       if (connected) {
@@ -705,14 +667,11 @@ function setupPipelines() {
 
   aiAssistant = new AIAssistant();
 
-  // Initialize keystroke collector
   keystrokeCollector = new EfficientKeystrokeCollector(processKeystrokeSequence);
 
-  // Initialize smart OCR scheduler
   smartOCRScheduler = new SmartOCRScheduler(500);
   smartOCRScheduler.setProcessCallback(processAppOCR);
 
-  // Make scheduler globally available for activity tracker
   global.smartOCRScheduler = smartOCRScheduler;
 
   activityTracker = new ComprehensiveActivityTracker((activityData) => {
@@ -727,12 +686,10 @@ function setupPipelines() {
     }
   }, currentUserId, currentSessionId);
 
-  // Set OCR manager reference for smart triggering
   activityTracker.ocrManager = ocrManager;
 
   appTracker = new ActiveAppTracker(ocrManager, async (appInfo) => {
     try {
-      // Prevent self-detection feedback loops (immediate check)
       const SQUIRE_APP_IDENTIFIERS = [
         'Squire',
         'squire-electron',
@@ -746,17 +703,15 @@ function setupPipelines() {
       );
 
       if (isSquireApp) {
-        // Check if this is user-initiated focus
         if (skipNextOCR) {
           console.log('🚫 Skipping OCR due to user-initiated focus of Squire');
-          skipNextOCR = false; // Reset for next time
+          skipNextOCR = false;
           return;
         }
         console.log('🚫 Ignoring self-focus, staying with previous app:', appInfo.appName);
-        return; // Skip processing our own app
+        return;
       }
 
-      // Update keystroke collector context
       if (keystrokeCollector) {
         keystrokeCollector.updateContext({
           app_name: appInfo.appName,
@@ -766,7 +721,6 @@ function setupPipelines() {
         });
       }
 
-      // Schedule smart OCR processing for valid apps
       smartOCRScheduler.scheduleOCR(appInfo, "app_switch");
 
     } catch (err) {
@@ -807,13 +761,11 @@ function setupPipelines() {
   }, 800);
 }
 
-// ----- App Event Handlers -----
 app.whenReady().then(async () => {
   createMainWindow();
   createDebugWindow();
   createSuggestionsWindow();
 
-  // Create session first, then setup pipelines
   await createUserSession();
   setupPipelines();
 
@@ -835,12 +787,10 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => {
   console.log("🛑 App shutting down, cleaning up...");
 
-  // Clean up keystroke collector
   if (keystrokeCollector) {
     keystrokeCollector.stopTracking();
   }
 
-  // Clean up other trackers
   if (appTracker) {
     appTracker.stopTracking();
   }
@@ -850,7 +800,6 @@ app.on("before-quit", () => {
   }
 });
 
-// ----- IPC Handlers -----
 ipcMain.handle("get-screen-info", () => {
   const displays = screen.getAllDisplays();
   return displays.map((display) => ({
@@ -872,17 +821,14 @@ ipcMain.on("suggestions-set-ignore-mouse-events", (event, ignore, options) => {
   }
 });
 
-// Handle overlay clicks - user wants to focus the app
 ipcMain.on("overlay-clicked", (event, overlayType) => {
   console.log(`🖱️ User clicked ${overlayType} overlay - focusing main window`);
 
-  // Show and focus the main window
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.show();
     mainWindow.focus();
   }
 
-  // Skip the next OCR when Squire comes into focus
   skipNextOCR = true;
 });
 

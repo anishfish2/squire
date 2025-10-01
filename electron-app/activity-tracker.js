@@ -1,6 +1,5 @@
 const { globalShortcut, screen } = require('electron');
 const activeWin = require('active-win');
-// Use Node.js 18+ built-in fetch if available, otherwise use node-fetch
 let fetch;
 try {
   fetch = globalThis.fetch;
@@ -11,7 +10,6 @@ try {
   try {
     fetch = require("node-fetch");
   } catch (e2) {
-    // Fetch not available
     fetch = () => Promise.reject(new Error("fetch not available"));
   }
 }
@@ -23,36 +21,30 @@ class ComprehensiveActivityTracker {
     this.eventBuffer = [];
     this.bufferFlushInterval = null;
 
-    // Backend configuration
-    this.backendUrl = "http://127.0.0.1:8000";
+    this.backendUrl = "http:
     this.userId = userId || "550e8400-e29b-41d4-a716-446655440000";
     this.sessionId = sessionId;
 
-    // Tracking state
     this.currentApp = null;
     this.currentWindow = null;
     this.lastMousePosition = { x: 0, y: 0 };
     this.mouseMovementBuffer = [];
     this.lastActivityTime = Date.now();
 
-    // Smart OCR Triggering State
     this.pauseDetection = {
       isInPause: false,
-      pauseThreshold: 3000, // 3 seconds
+      pauseThreshold: 3000,
       lastActivityTime: Date.now(),
       wasActiveBeforePause: false
     };
 
-    // OCR Manager reference (set externally)
     this.ocrManager = null;
 
-    // Intervals
     this.appCheckInterval = null;
     this.mouseTrackingInterval = null;
     this.mouseSummaryInterval = null;
     this.idleCheckInterval = null;
 
-    // Event counters for session stats
     this.sessionStats = {
       keystrokes: 0,
       mouseClicks: 0,
@@ -67,20 +59,15 @@ class ComprehensiveActivityTracker {
     if (this.isTracking) return;
 
     this.isTracking = true;
-    // Starting tracking
 
-    // Start various tracking components
     this.startAppTracking();
     this.startMouseTracking();
     this.startKeystrokeTracking();
     this.startIdleDetection();
     this.startEventBufferFlush();
 
-    // Session ID should already be provided from main.js
     if (this.sessionId) {
-      // Session ID set
     } else {
-      // No session ID
     }
 
     this.addEvent("session_start", {
@@ -93,19 +80,15 @@ class ComprehensiveActivityTracker {
     if (!this.isTracking) return;
 
     this.isTracking = false;
-    // Stopping tracking
 
-    // Clear all intervals
     if (this.appCheckInterval) clearInterval(this.appCheckInterval);
     if (this.mouseTrackingInterval) clearInterval(this.mouseTrackingInterval);
-    if (this.mouseSummaryInterval) clearInterval(this.mouseSummaryInterval); // ✅ fixed
+    if (this.mouseSummaryInterval) clearInterval(this.mouseSummaryInterval);
     if (this.idleCheckInterval) clearInterval(this.idleCheckInterval);
     if (this.bufferFlushInterval) clearInterval(this.bufferFlushInterval);
 
-    // Unregister global shortcuts
     globalShortcut.unregisterAll();
 
-    // Final event flush
     this.addEvent("session_end", {
       timestamp: Date.now(),
       sessionDuration: Date.now() - this.sessionStats.sessionStart,
@@ -114,17 +97,15 @@ class ComprehensiveActivityTracker {
 
     await this.flushEventBuffer();
 
-    // Send final session stats to backend
     await this.sendSessionStatsToBackend();
   }
 
-  // App and Window Tracking
   startAppTracking() {
     this.appCheckInterval = setInterval(() => {
       this.checkActiveApp();
-    }, 300); // Check every 300ms for responsive detection
+    }, 300);
 
-    this.checkActiveApp(); // Initial check
+    this.checkActiveApp();
   }
 
   async checkActiveApp() {
@@ -132,7 +113,6 @@ class ComprehensiveActivityTracker {
       const activeWindow = await activeWin();
       if (!activeWindow) return;
 
-      // Skip our own app
       if (activeWindow.owner && activeWindow.owner.name === "Electron") {
         return;
       }
@@ -141,7 +121,6 @@ class ComprehensiveActivityTracker {
       const newWindowTitle = activeWindow.title || "No Title";
       const processId = activeWindow.owner ? activeWindow.owner.processId : null;
 
-      // Detect app switch
       if (this.currentApp !== newAppName) {
         this.addEvent("app_switch", {
           timestamp: Date.now(),
@@ -155,7 +134,6 @@ class ComprehensiveActivityTracker {
         this.updateActivityForPauseDetection();
       }
 
-      // Detect window switch within same app
       if (this.currentWindow !== newWindowTitle) {
         this.addEvent("window_switch", {
           timestamp: Date.now(),
@@ -169,18 +147,14 @@ class ComprehensiveActivityTracker {
         this.sessionStats.windowSwitches++;
       }
     } catch (error) {
-      // App check error
     }
   }
 
-  // Mouse Tracking
   startMouseTracking() {
-    // Track raw points but only flush every 5 seconds as a summary
     this.mouseTrackingInterval = setInterval(() => {
       this.trackMousePosition();
-    }, 100); // still sample often
+    }, 100);
 
-    // New: summary flush every 5s
     this.mouseSummaryInterval = setInterval(() => {
       this.flushMouseMovementSummary();
     }, 5000);
@@ -200,13 +174,12 @@ class ComprehensiveActivityTracker {
           x: currentPos.x,
           y: currentPos.y,
           distance: distance,
-          velocity: distance / 0.1, // pixels per second
+          velocity: distance / 0.1,
         });
 
         this.lastActivityTime = Date.now();
         this.updateActivityForPauseDetection();
 
-        // Keep buffer from growing unbounded
         if (this.mouseMovementBuffer.length > 200) {
           this.mouseMovementBuffer.shift();
         }
@@ -214,7 +187,6 @@ class ComprehensiveActivityTracker {
 
       this.lastMousePosition = currentPos;
     } catch (error) {
-      // ignore tracking errors
     }
   }
 
@@ -222,19 +194,17 @@ class ComprehensiveActivityTracker {
     if (this.mouseMovementBuffer.length === 0) return;
 
     const recent = [...this.mouseMovementBuffer];
-    this.mouseMovementBuffer = []; // clear for next batch
+    this.mouseMovementBuffer = [];
 
     const avgVelocity =
       recent.reduce((sum, m) => sum + m.velocity, 0) / recent.length;
     const totalDistance = recent.reduce((sum, m) => sum + m.distance, 0);
 
-    // Calculate bounding box for the movement
     const minX = Math.min(...recent.map((m) => m.x));
     const maxX = Math.max(...recent.map((m) => m.x));
     const minY = Math.min(...recent.map((m) => m.y));
     const maxY = Math.max(...recent.map((m) => m.y));
 
-    // ✅ increment stats here instead of per movement
     this.sessionStats.mouseMoves += recent.length;
 
     this.addEvent("mouse_movement_summary", {
@@ -244,7 +214,6 @@ class ComprehensiveActivityTracker {
       totalDistance: Math.round(totalDistance),
       bounds: { minX, maxX, minY, maxY },
       pattern: this.analyzeMovementPattern(recent),
-      // Optional: keep path for debugging/replay
       path: recent.map((m) => ({ x: m.x, y: m.y, t: m.timestamp })),
     });
   }
@@ -260,7 +229,6 @@ class ComprehensiveActivityTracker {
     return "slow";
   }
 
-  // Keystroke Tracking
   startKeystrokeTracking() {
     const keyToTrack = [
       "CommandOrControl+C",
@@ -294,18 +262,14 @@ class ComprehensiveActivityTracker {
           this.updateActivityForPauseDetection();
         });
       } catch (error) {
-        // Shortcut registration failed
       }
     });
   }
 
-  // Smart OCR Triggering - Pause Detection
   updateActivityForPauseDetection() {
     const now = Date.now();
 
-    // If we were in a pause and now have activity, trigger OCR
     if (this.pauseDetection.isInPause && this.pauseDetection.wasActiveBeforePause) {
-      // Activity resumed
       this.triggerSmartOCR("activity_resumed");
       this.pauseDetection.isInPause = false;
     }
@@ -318,27 +282,22 @@ class ComprehensiveActivityTracker {
     const now = Date.now();
     const timeSinceActivity = now - this.pauseDetection.lastActivityTime;
 
-    // If we've been inactive for the threshold and weren't already in pause
     if (timeSinceActivity >= this.pauseDetection.pauseThreshold &&
         !this.pauseDetection.isInPause &&
         this.pauseDetection.wasActiveBeforePause) {
 
-      // Pause detected
       this.pauseDetection.isInPause = true;
     }
   }
 
   triggerSmartOCR(reason) {
-    // Use the smart scheduler if available, otherwise fall back to direct OCR
     if (global.smartOCRScheduler && global.smartOCRScheduler.triggerImmediateOCR) {
-      // Smart OCR scheduled
       global.smartOCRScheduler.triggerImmediateOCR({
         appName: this.currentApp,
         windowTitle: this.currentWindow,
         session_id: this.sessionId
       }, reason);
     } else if (this.ocrManager && this.ocrManager.triggerSmartOCR) {
-      // Fallback OCR triggered
       this.ocrManager.triggerSmartOCR(reason, {
         appName: this.currentApp,
         windowTitle: this.currentWindow,
@@ -347,12 +306,10 @@ class ComprehensiveActivityTracker {
     }
   }
 
-  // Idle Detection
   startIdleDetection() {
     this.idleCheckInterval = setInterval(() => {
       const timeSinceActivity = Date.now() - this.lastActivityTime;
 
-      // Check for pause detection
       this.checkForPause();
 
       if (timeSinceActivity > 30000) {
@@ -367,7 +324,6 @@ class ComprehensiveActivityTracker {
     }, 10000);
   }
 
-  // Event Management
   addEvent(type, data) {
     const event = {
       type: type,

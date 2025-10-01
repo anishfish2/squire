@@ -6,27 +6,23 @@ class OCRManager {
   constructor(overlayWindow = null) {
     this.isProcessing = false;
     this.overlayWindow = overlayWindow;
-    this.backendUrl = 'http://127.0.0.1:8000';
+    this.backendUrl = 'http:
 
-    // Content similarity tracking
     this.lastOCRContent = [];
     this.lastOCRTimestamp = 0;
-    this.contentSimilarityThreshold = 0.8; // 80% similarity threshold
-    this.minTimeBetweenOCR = 5000; // 5 seconds minimum
+    this.contentSimilarityThreshold = 0.8;
+    this.minTimeBetweenOCR = 5000;
 
-    // WebSocket for real-time job completion
     this.wsManager = new WebSocketManager();
-    this.pendingJobs = new Map(); // job_id -> {resolve, reject, timeout}
+    this.pendingJobs = new Map();
     this.userId = null;
 
-    // Set up WebSocket event handlers
     this._setupWebSocketHandlers();
 
     console.log('🔌 OCR Manager initialized with WebSocket support');
   }
 
   _setupWebSocketHandlers() {
-    // Handle OCR job completion
     this.wsManager.onOCRJobComplete((data) => {
       const jobId = data.job_id;
       console.log(`🎉 OCR job completed via WebSocket: ${jobId}`);
@@ -43,7 +39,6 @@ class OCRManager {
       }
     });
 
-    // Handle WebSocket errors
     this.wsManager.onError((error) => {
       console.log('❌ WebSocket error in OCR Manager:', error);
     });
@@ -63,16 +58,13 @@ class OCRManager {
 
   async captureAndRecognize(appContext = {}, userId = null) {
     if (this.isProcessing) {
-      // OCR in progress
       return [];
     }
 
     this.isProcessing = true;
     let wasVisible = false;
     try {
-      // Start capture
 
-      // Hide overlay during capture
 
       if (this.overlayWindow && this.overlayWindow.isVisible()) {
         wasVisible = true;
@@ -80,26 +72,25 @@ class OCRManager {
         await new Promise(resolve => setTimeout(resolve, 100));
       }
 
-      // Capture screenshot
       const imgBuffer = await screenshot({ format: 'png' });
-      // Screenshot captured
+      console.log("Screenshot buffer length:", imgBuffer.length);
+      if (imgBuffer.length === 0) {
+        console.warn("⚠️ Screenshot buffer is empty!");
+      }
 
-      // Show overlay again without focusing
+
       if (wasVisible && this.overlayWindow) {
         this.overlayWindow.showInactive();
       }
 
-      // Queue OCR job with context
       const jobId = await this.queueOCRJob(imgBuffer, appContext, userId);
 
       if (jobId) {
         console.log(`📋 OCR job queued: ${jobId}`);
 
-        // Wait for job completion via WebSocket
         const result = await this.waitForJobCompletionWebSocket(jobId);
         const textLines = result.text_lines || [];
 
-        // Update content tracking
         this.lastOCRContent = textLines;
         this.lastOCRTimestamp = Date.now();
 
@@ -110,17 +101,14 @@ class OCRManager {
       }
 
     } catch (error) {
-      // Only restore overlay if it was visible before we hid it (without focusing)
       if (wasVisible && this.overlayWindow && !this.overlayWindow.isVisible()) {
         this.overlayWindow.showInactive();
       }
 
       if (error.message && error.message.includes('screen recording')) {
-        // Permission required
         return [];
       }
 
-      // OCR error
       return [];
     } finally {
       this.isProcessing = false;
@@ -129,29 +117,24 @@ class OCRManager {
 
   async captureAndQueueOCR(appContext = {}, userId = null) {
     if (this.isProcessing) {
-      // OCR in progress
       return null;
     }
 
     this.isProcessing = true;
     let wasVisible = false;
     try {
-      // Hide overlay during capture
       if (this.overlayWindow && this.overlayWindow.isVisible()) {
         wasVisible = true;
         this.overlayWindow.hide();
         await new Promise(resolve => setTimeout(resolve, 100));
       }
 
-      // Capture screenshot
       const imgBuffer = await screenshot({ format: 'png' });
 
-      // Show overlay again without focusing
       if (wasVisible && this.overlayWindow) {
         this.overlayWindow.showInactive();
       }
 
-      // Queue OCR job with context and return job ID immediately
       const jobId = await this.queueOCRJob(imgBuffer, appContext, userId);
 
       if (jobId) {
@@ -163,7 +146,6 @@ class OCRManager {
       }
 
     } catch (error) {
-      // Only restore overlay if it was visible before we hid it (without focusing)
       if (wasVisible && this.overlayWindow && !this.overlayWindow.isVisible()) {
         this.overlayWindow.showInactive();
       }
@@ -179,7 +161,6 @@ class OCRManager {
   }
 
   async queueOCRJob(imageBuffer, appContext, userId) {
-    // Queue OCR job
     try {
       const form = new FormData();
       form.append('file', imageBuffer, 'screenshot.png');
@@ -195,7 +176,6 @@ class OCRManager {
         capture_method: 'auto'
       }));
 
-      // User ID set
 
       const response = await this.makeHttpRequest(`${this.backendUrl}/api/ai/ocr/queue/context`, {
         method: 'POST',
@@ -206,27 +186,22 @@ class OCRManager {
       return response.job_id;
 
     } catch (error) {
-      // Queue error
       return null;
     }
   }
 
   async waitForJobCompletionWebSocket(jobId, maxWaitTime = 30000) {
     return new Promise((resolve, reject) => {
-      // Set up timeout
       const timeout = setTimeout(() => {
         this.pendingJobs.delete(jobId);
         reject(new Error('OCR job timeout'));
       }, maxWaitTime);
 
-      // Store the pending job for WebSocket handling
       this.pendingJobs.set(jobId, { resolve, reject, timeout });
 
-      // Check WebSocket connection
       if (!this.wsManager.connected) {
         console.log('⚠️ WebSocket not connected, falling back to polling for job', jobId);
 
-        // Fall back to polling if WebSocket is not available
         clearTimeout(timeout);
         this.pendingJobs.delete(jobId);
         this.waitForJobCompletionPolling(jobId, maxWaitTime).then(resolve).catch(reject);
@@ -236,7 +211,6 @@ class OCRManager {
     });
   }
 
-  // Keep polling as fallback method
   async waitForJobCompletionPolling(jobId, maxWaitTime = 30000, pollInterval = 1000) {
     const startTime = Date.now();
 
@@ -272,7 +246,6 @@ class OCRManager {
       return response;
 
     } catch (error) {
-      // Status error
       throw error;
     }
   }
@@ -286,7 +259,6 @@ class OCRManager {
       return response.queue_stats;
 
     } catch (error) {
-      // Queue stats error
       return null;
     }
   }
@@ -344,40 +316,31 @@ class OCRManager {
     });
   }
 
-  // Smart OCR Triggering
   shouldTriggerOCR(reason = "unknown") {
     const now = Date.now();
 
-    // Check minimum time between OCR calls
     if (now - this.lastOCRTimestamp < this.minTimeBetweenOCR) {
-      // OCR too recent
       return false;
     }
 
-    // If we're already processing, skip
     if (this.isProcessing) {
-      // OCR in progress
       return false;
     }
 
-    // OCR approved
     return true;
   }
 
   async shouldTriggerBasedOnContent(newContent) {
     if (!this.lastOCRContent || this.lastOCRContent.length === 0) {
-      // No previous content
       return true;
     }
 
     const similarity = this.calculateContentSimilarity(this.lastOCRContent, newContent);
 
     if (similarity < this.contentSimilarityThreshold) {
-      // Content changed
       return true;
     }
 
-    // Content similar
     return false;
   }
 
@@ -386,14 +349,13 @@ class OCRManager {
       return 0;
     }
 
-    // Simple text similarity based on shared lines
     const set1 = new Set(content1.map(line => line.trim().toLowerCase()));
     const set2 = new Set(content2.map(line => line.trim().toLowerCase()));
 
     const intersection = new Set([...set1].filter(x => set2.has(x)));
     const union = new Set([...set1, ...set2]);
 
-    if (union.size === 0) return 1; // Both empty
+    if (union.size === 0) return 1;
 
     return intersection.size / union.size;
   }
@@ -403,20 +365,17 @@ class OCRManager {
       return [];
     }
 
-    // Smart OCR triggered
     return await this.captureAndRecognize(appContext, userId);
   }
 
   async terminate() {
     console.log('🛑 Terminating OCR Manager...');
 
-    // Clear any pending jobs
     for (const [jobId, { timeout }] of this.pendingJobs) {
       clearTimeout(timeout);
     }
     this.pendingJobs.clear();
 
-    // Disconnect WebSocket
     if (this.wsManager) {
       this.wsManager.disconnect();
     }

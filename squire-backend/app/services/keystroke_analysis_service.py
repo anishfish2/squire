@@ -10,39 +10,30 @@ from app.core.database import supabase
 class KeystrokeAnalysisService:
     def __init__(self):
         self.analysis_cache = {}
-        print("🎹 KeystrokeAnalysisService initialized")
 
     def _convert_timestamp(self, timestamp_value):
-        """Convert various timestamp formats to proper datetime"""
         if not timestamp_value:
             return datetime.now(timezone.utc).isoformat()
 
-        # If it's already a datetime string, return it
         if isinstance(timestamp_value, str):
             try:
-                # Try parsing as ISO format
                 datetime.fromisoformat(timestamp_value.replace('Z', '+00:00'))
                 return timestamp_value
             except:
                 pass
 
-        # If it's a numeric timestamp (milliseconds since epoch)
         if isinstance(timestamp_value, (int, float, str)):
             try:
-                # Convert to float and handle milliseconds
                 timestamp_float = float(timestamp_value)
 
-                # If the number is very large, it's likely milliseconds
-                if timestamp_float > 1e12:  # Likely milliseconds
+                if timestamp_float > 1e12:
                     timestamp_float = timestamp_float / 1000
 
-                # Convert to datetime
                 dt = datetime.fromtimestamp(timestamp_float, tz=timezone.utc)
                 return dt.isoformat()
             except (ValueError, OSError):
                 pass
 
-        # Fallback to current time
         return datetime.now(timezone.utc).isoformat()
 
     async def process_keystroke_sequence(
@@ -51,20 +42,13 @@ class KeystrokeAnalysisService:
         sequence_data: Dict[str, Any],
         session_context: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Process and analyze a keystroke sequence"""
         try:
-            print(f"🎹 Processing keystroke sequence: {sequence_data.get('keystroke_count', 0)} keystrokes")
-
-            # Store the raw sequence data
             stored_sequence = await self._store_keystroke_sequence(user_id, sequence_data, session_context)
 
-            # Analyze patterns in the sequence
             pattern_analysis = await self._analyze_keystroke_patterns(sequence_data)
 
-            # Detect efficiency opportunities
             efficiency_analysis = await self._analyze_efficiency_opportunities(sequence_data, session_context)
 
-            # Store analysis results
             analysis_results = {
                 "sequence_id": stored_sequence.get("id"),
                 "patterns_detected": len(pattern_analysis.get("significant_patterns", [])),
@@ -76,11 +60,9 @@ class KeystrokeAnalysisService:
 
             await self._store_analysis_results(user_id, stored_sequence.get("id"), analysis_results)
 
-            print(f"✅ Keystroke analysis complete: {analysis_results['patterns_detected']} patterns detected")
             return analysis_results
 
         except Exception as e:
-            print(f"❌ Error processing keystroke sequence: {e}")
             traceback.print_exc()
             return {
                 "sequence_id": None,
@@ -95,9 +77,7 @@ class KeystrokeAnalysisService:
         sequence_data: Dict[str, Any],
         session_context: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Store keystroke sequence in database"""
         try:
-            # Create database record
             sequence_record = {
                 "id": str(uuid.uuid4()),
                 "user_id": user_id,
@@ -120,18 +100,14 @@ class KeystrokeAnalysisService:
                 "updated_at": datetime.now(timezone.utc).isoformat()
             }
 
-            # Store in database
             result = supabase.table("keystroke_sequences").insert(sequence_record).execute()
 
-            print(f"💾 Stored keystroke sequence: {sequence_record['id']}")
             return result.data[0] if result.data else sequence_record
 
         except Exception as e:
-            print(f"❌ Error storing keystroke sequence: {e}")
             raise
 
     async def _analyze_keystroke_patterns(self, sequence_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Analyze patterns in keystroke sequence"""
         try:
             keys = sequence_data.get("keys", [])
             timings = sequence_data.get("timings", [])
@@ -147,21 +123,17 @@ class KeystrokeAnalysisService:
                 "significant_patterns": []
             }
 
-            # Identify significant patterns that might indicate inefficiencies
             analysis["significant_patterns"] = self._identify_significant_patterns(analysis)
 
             return analysis
 
         except Exception as e:
-            print(f"❌ Error analyzing keystroke patterns: {e}")
             return {"error": str(e)}
 
     def _analyze_repetitive_patterns(self, repetitive_sequences: List[Dict]) -> Dict[str, Any]:
-        """Analyze repetitive keystroke patterns"""
         if not repetitive_sequences:
             return {"total_repetitive_sequences": 0}
 
-        # Analyze repetitive patterns for efficiency opportunities
         high_repetition_sequences = [seq for seq in repetitive_sequences if seq.get("repetitions", 0) >= 5]
         navigation_repetitions = [seq for seq in repetitive_sequences
                                 if seq.get("key") in ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "j", "k", "h", "l"]]
@@ -170,12 +142,11 @@ class KeystrokeAnalysisService:
             "total_repetitive_sequences": len(repetitive_sequences),
             "high_repetition_sequences": len(high_repetition_sequences),
             "navigation_repetitions": len(navigation_repetitions),
-            "repetition_details": repetitive_sequences[:5],  # Store first 5 for analysis
+            "repetition_details": repetitive_sequences[:5],
             "potential_inefficiencies": len(high_repetition_sequences) > 0
         }
 
     def _analyze_timing_patterns(self, timing_patterns: Dict[str, Any]) -> Dict[str, Any]:
-        """Analyze timing patterns for efficiency insights"""
         if not timing_patterns:
             return {"typing_efficiency": "unknown"}
 
@@ -183,14 +154,13 @@ class KeystrokeAnalysisService:
         rhythm = timing_patterns.get("typing_rhythm", "unknown")
         variance = timing_patterns.get("interval_variance", 0)
 
-        # Determine efficiency indicators
-        efficiency_score = 0.5  # Default neutral
+        efficiency_score = 0.5
         if rhythm == "fast_consistent":
             efficiency_score = 0.8
         elif rhythm == "slow_deliberate" and variance < 100:
-            efficiency_score = 0.6  # Careful but consistent
+            efficiency_score = 0.6
         elif avg_interval > 500:
-            efficiency_score = 0.3  # Very slow typing
+            efficiency_score = 0.3
 
         return {
             "avg_interval": avg_interval,
@@ -202,14 +172,12 @@ class KeystrokeAnalysisService:
         }
 
     def _analyze_navigation_patterns(self, navigation_sequences: List[Dict]) -> Dict[str, Any]:
-        """Analyze navigation patterns for efficiency opportunities"""
         if not navigation_sequences:
             return {"navigation_efficiency": "no_data"}
 
         total_sequences = len(navigation_sequences)
         long_sequences = [seq for seq in navigation_sequences if len(seq.get("keys", [])) >= 5]
 
-        # Check for potentially inefficient navigation patterns
         repetitive_navigation = [seq for seq in navigation_sequences
                                if seq.get("pattern_type") in ["vertical_down", "vertical_up"]
                                and len(seq.get("keys", [])) >= 5]
@@ -223,14 +191,12 @@ class KeystrokeAnalysisService:
         }
 
     def _analyze_shortcut_patterns(self, shortcut_sequences: List[Dict]) -> Dict[str, Any]:
-        """Analyze keyboard shortcut usage patterns"""
         if not shortcut_sequences:
             return {"shortcut_usage": "minimal"}
 
         shortcuts = [seq.get("shortcut", "") for seq in shortcut_sequences]
         unique_shortcuts = set(shortcuts)
 
-        # Common efficiency shortcuts
         productivity_shortcuts = [
             "cmd+c", "cmd+v", "cmd+x", "cmd+z", "cmd+s", "cmd+f", "cmd+a",
             "ctrl+c", "ctrl+v", "ctrl+x", "ctrl+z", "ctrl+s", "ctrl+f", "ctrl+a"
@@ -247,7 +213,6 @@ class KeystrokeAnalysisService:
         }
 
     def _calculate_efficiency_indicators(self, sequence_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Calculate overall efficiency indicators for the sequence"""
         metadata = sequence_data.get("metadata", {})
         patterns = sequence_data.get("patterns", {})
 
@@ -255,11 +220,9 @@ class KeystrokeAnalysisService:
         shortcuts_used = metadata.get("shortcuts_used", 0)
         navigation_keys = metadata.get("navigation_keys_used", 0)
 
-        # Calculate efficiency ratios
         shortcut_ratio = shortcuts_used / max(total_keystrokes, 1)
         navigation_ratio = navigation_keys / max(total_keystrokes, 1)
 
-        # Analyze repetitive patterns for inefficiency detection
         repetitive_sequences = patterns.get("repetitive_sequences", [])
         high_repetition_count = len([seq for seq in repetitive_sequences if seq.get("repetitions", 0) >= 5])
 
@@ -271,32 +234,26 @@ class KeystrokeAnalysisService:
         }
 
     def _estimate_overall_efficiency(self, shortcut_ratio: float, navigation_ratio: float, high_repetition_count: int) -> float:
-        """Estimate overall efficiency score for the sequence"""
-        efficiency_score = 0.5  # Start neutral
+        efficiency_score = 0.5
 
-        # Bonus for good shortcut usage
         if shortcut_ratio > 0.1:
             efficiency_score += 0.2
         elif shortcut_ratio > 0.05:
             efficiency_score += 0.1
 
-        # Penalty for excessive repetitive patterns
         if high_repetition_count > 3:
             efficiency_score -= 0.3
         elif high_repetition_count > 1:
             efficiency_score -= 0.1
 
-        # Slight penalty for excessive navigation (might indicate inefficient movement)
         if navigation_ratio > 0.3:
             efficiency_score -= 0.1
 
         return max(0.0, min(1.0, efficiency_score))
 
     def _identify_significant_patterns(self, analysis: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Identify patterns that might warrant efficiency suggestions"""
         significant_patterns = []
 
-        # Check repetitive navigation
         repetitive_nav = analysis.get("navigation_analysis", {}).get("repetitive_navigation_sequences", 0)
         if repetitive_nav > 0:
             significant_patterns.append({
@@ -306,9 +263,8 @@ class KeystrokeAnalysisService:
                 "suggestion_category": "navigation_optimization"
             })
 
-        # Check low shortcut usage
         shortcut_ratio = analysis.get("efficiency_indicators", {}).get("shortcut_usage_ratio", 0)
-        if shortcut_ratio < 0.05:  # Less than 5% shortcuts
+        if shortcut_ratio < 0.05:
             significant_patterns.append({
                 "type": "low_shortcut_usage",
                 "severity": "medium",
@@ -316,7 +272,6 @@ class KeystrokeAnalysisService:
                 "suggestion_category": "shortcut_learning"
             })
 
-        # Check high repetition patterns
         high_repetitions = analysis.get("repetitive_patterns", {}).get("high_repetition_sequences", 0)
         if high_repetitions > 2:
             significant_patterns.append({
@@ -329,7 +284,6 @@ class KeystrokeAnalysisService:
         return significant_patterns
 
     def _categorize_typing_speed(self, avg_interval: float) -> str:
-        """Categorize typing speed based on average interval"""
         if avg_interval < 100:
             return "fast"
         elif avg_interval < 200:
@@ -344,16 +298,13 @@ class KeystrokeAnalysisService:
         sequence_data: Dict[str, Any],
         session_context: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Analyze sequence for efficiency improvement opportunities"""
         try:
             app_name = sequence_data.get("context_data", {}).get("primary_app", "Unknown")
             patterns = sequence_data.get("patterns", {})
 
-            # Basic efficiency analysis
             recommendations = []
             efficiency_score = 0.5
 
-            # Check for vim-style navigation opportunities
             navigation_sequences = patterns.get("navigation_sequences", [])
             repetitive_nav = [seq for seq in navigation_sequences
                             if seq.get("pattern_type") in ["vertical_down", "vertical_up"]
@@ -369,7 +320,6 @@ class KeystrokeAnalysisService:
                 })
                 efficiency_score -= 0.2
 
-            # Check shortcut usage
             shortcut_sequences = patterns.get("shortcut_sequences", [])
             if len(shortcut_sequences) < 2 and sequence_data.get("keystroke_count", 0) > 20:
                 recommendations.append({
@@ -390,7 +340,6 @@ class KeystrokeAnalysisService:
             }
 
         except Exception as e:
-            print(f"❌ Error analyzing efficiency opportunities: {e}")
             return {
                 "efficiency_score": 0.5,
                 "recommendations": [],
@@ -403,13 +352,10 @@ class KeystrokeAnalysisService:
         sequence_id: str,
         analysis_results: Dict[str, Any]
     ) -> None:
-        """Store keystroke analysis results"""
         try:
             if not sequence_id:
-                print("⚠️ No sequence_id provided, skipping analysis storage")
                 return
 
-            # Create analysis record
             analysis_record = {
                 "id": str(uuid.uuid4()),
                 "user_id": user_id,
@@ -418,19 +364,16 @@ class KeystrokeAnalysisService:
                 "created_at": datetime.now(timezone.utc).isoformat()
             }
 
-            # Store in database
             result = supabase.table("keystroke_analysis").insert(analysis_record).execute()
-            print(f"💾 Stored keystroke analysis: {analysis_record['id']}")
 
         except Exception as e:
-            print(f"❌ Error storing analysis results: {e}")
+            pass
 
     async def get_user_keystroke_patterns(
         self,
         user_id: str,
         limit: int = 10
     ) -> List[Dict[str, Any]]:
-        """Get recent keystroke patterns for a user"""
         try:
             result = supabase.table("keystroke_sequences").select("*").eq(
                 "user_id", user_id
@@ -439,7 +382,6 @@ class KeystrokeAnalysisService:
             return result.data if result.data else []
 
         except Exception as e:
-            print(f"❌ Error getting user keystroke patterns: {e}")
             return []
 
     async def get_efficiency_insights(
@@ -447,13 +389,10 @@ class KeystrokeAnalysisService:
         user_id: str,
         app_name: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Get efficiency insights for a user, optionally filtered by app"""
         try:
-            # Get recent analyses
             query = supabase.table("keystroke_analysis").select("*").eq("user_id", user_id)
 
             if app_name:
-                # This would need more complex filtering in production
                 pass
 
             result = query.order("created_at", desc=True).limit(20).execute()
@@ -461,7 +400,6 @@ class KeystrokeAnalysisService:
             if not result.data:
                 return {"insights": "No keystroke data available"}
 
-            # Aggregate insights
             analyses = result.data
             total_analyses = len(analyses)
             avg_efficiency = sum(a.get("analysis_data", {}).get("efficiency_score", 0.5) for a in analyses) / total_analyses
@@ -481,5 +419,4 @@ class KeystrokeAnalysisService:
             }
 
         except Exception as e:
-            print(f"❌ Error getting efficiency insights: {e}")
             return {"error": str(e)}

@@ -1,7 +1,3 @@
-"""
-App Session Management Service
-Handles consolidated app usage tracking to eliminate data duplication
-"""
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 from uuid import UUID
@@ -9,7 +5,6 @@ from app.core.database import execute_query
 
 
 class AppSessionService:
-    """Service for managing app sessions and consolidating app usage data"""
 
     @staticmethod
     async def create_or_update_app_session(
@@ -22,12 +17,7 @@ class AppSessionService:
         domain: str = "",
         activity_summary: str = ""
     ) -> str:
-        """
-        Create new app session or update existing active one.
-        Returns app_session_id.
-        """
         try:
-            # Check for active app session (same user, session, app)
             active_sessions = await execute_query(
                 table="app_sessions",
                 operation="select",
@@ -43,7 +33,6 @@ class AppSessionService:
             current_time = datetime.now()
 
             if active_sessions:
-                # Update existing active session
                 app_session_id = active_sessions[0]["id"]
 
                 update_data = {
@@ -53,7 +42,6 @@ class AppSessionService:
                     "updated_at": current_time.isoformat()
                 }
 
-                # Update context if provided
                 if context_type:
                     update_data["context_type"] = context_type
                 if domain:
@@ -68,11 +56,9 @@ class AppSessionService:
                     filters={"id": app_session_id}
                 )
 
-                print(f"✅ Updated existing app session: {app_session_id}")
                 return app_session_id
 
             else:
-                # Create new app session
                 app_session_data = {
                     "user_id": user_id,
                     "session_id": session_id,
@@ -94,16 +80,13 @@ class AppSessionService:
                 )
 
                 app_session_id = result[0]["id"] if result else None
-                print(f"🆕 Created new app session: {app_session_id}")
                 return app_session_id
 
         except Exception as e:
-            print(f"❌ Error creating/updating app session: {e}")
             return None
 
     @staticmethod
     async def end_app_session(app_session_id: str, reason: str = "manual") -> bool:
-        """End an active app session"""
         try:
             current_time = datetime.now()
 
@@ -119,20 +102,16 @@ class AppSessionService:
                 filters={"id": app_session_id}
             )
 
-            print(f"🔚 Ended app session: {app_session_id} (reason: {reason})")
             return True
 
         except Exception as e:
-            print(f"❌ Error ending app session: {e}")
             return False
 
     @staticmethod
     async def end_inactive_sessions(user_id: str, session_id: str, timeout_minutes: int = 5) -> int:
-        """End app sessions that haven't had activity for specified timeout"""
         try:
             cutoff_time = datetime.now() - timedelta(minutes=timeout_minutes)
 
-            # Get inactive sessions
             inactive_sessions = await execute_query(
                 table="app_sessions",
                 operation="select",
@@ -153,18 +132,13 @@ class AppSessionService:
                     )
                     ended_count += 1
 
-            if ended_count > 0:
-                print(f"⏰ Ended {ended_count} inactive app sessions")
-
             return ended_count
 
         except Exception as e:
-            print(f"❌ Error ending inactive sessions: {e}")
             return 0
 
     @staticmethod
     async def get_active_app_sessions(user_id: str, session_id: str = None) -> List[Dict]:
-        """Get currently active app sessions for user"""
         try:
             filters = {
                 "user_id": user_id,
@@ -185,17 +159,14 @@ class AppSessionService:
             return sessions or []
 
         except Exception as e:
-            print(f"❌ Error getting active app sessions: {e}")
             return []
 
     @staticmethod
     async def get_app_usage_summary(user_id: str, date: str = None) -> Dict[str, Any]:
-        """Get app usage summary for a specific date"""
         try:
             if not date:
                 date = datetime.now().date().isoformat()
 
-            # Get app sessions for the date
             sessions = await execute_query(
                 table="app_sessions",
                 operation="select",
@@ -207,18 +178,17 @@ class AppSessionService:
             if not sessions:
                 return {"date": date, "total_apps": 0, "total_minutes": 0, "app_breakdown": {}}
 
-            # Filter by date and calculate usage
             app_usage = {}
             total_minutes = 0
 
             for session in sessions:
-                session_date = session["start_time"][:10]  # Extract date part
+                session_date = session["start_time"][:10]
                 if session_date != date:
                     continue
 
                 app_name = session["app_name"]
                 duration = session.get("duration_seconds", 0) or 0
-                minutes = max(1, duration // 60)  # Minimum 1 minute
+                minutes = max(1, duration // 60)
 
                 app_usage[app_name] = app_usage.get(app_name, 0) + minutes
                 total_minutes += minutes
@@ -231,12 +201,10 @@ class AppSessionService:
             }
 
         except Exception as e:
-            print(f"❌ Error getting app usage summary: {e}")
             return {"date": date, "total_apps": 0, "total_minutes": 0, "app_breakdown": {}}
 
     @staticmethod
     async def get_recent_app_context(user_id: str, limit: int = 5) -> List[Dict]:
-        """Get recent app contexts for building user history"""
         try:
             sessions = await execute_query(
                 table="app_sessions",
@@ -262,7 +230,6 @@ class AppSessionService:
             return contexts
 
         except Exception as e:
-            print(f"❌ Error getting recent app context: {e}")
             return []
 
     @staticmethod
@@ -272,7 +239,6 @@ class AppSessionService:
         domain: str = None,
         activity_summary: str = None
     ) -> bool:
-        """Update context information for an existing app session"""
         try:
             update_data = {"updated_at": datetime.now().isoformat()}
 
@@ -290,9 +256,7 @@ class AppSessionService:
                 filters={"id": app_session_id}
             )
 
-            print(f"📝 Updated context for app session: {app_session_id}")
             return True
 
         except Exception as e:
-            print(f"❌ Error updating session context: {e}")
             return False

@@ -27,18 +27,15 @@ class OCRJobManager:
     def __init__(self, max_workers: int = 4):
         self.max_workers = max_workers
         self.active_workers: Dict[str, asyncio.Task] = {}
-        self.ocr_services: Dict[str, PaddleOCRService] = {}  # One per worker
+        self.ocr_services: Dict[str, PaddleOCRService] = {}
         self.is_running = False
 
     async def start(self):
-        """Start the job processing system"""
         if self.is_running:
             return
 
         self.is_running = True
-        print(f"🚀 Starting OCR Job Manager with {self.max_workers} workers")
 
-        # Start worker tasks
         for i in range(self.max_workers):
             worker_id = f"worker_{i}"
             self.active_workers[worker_id] = asyncio.create_task(
@@ -46,17 +43,13 @@ class OCRJobManager:
             )
 
     async def stop(self):
-        """Stop the job processing system"""
         self.is_running = False
 
-        # Cancel all workers
         for worker_id, task in self.active_workers.items():
             task.cancel()
 
-        # Wait for workers to finish
         await asyncio.gather(*self.active_workers.values(), return_exceptions=True)
         self.active_workers.clear()
-        print("🛑 OCR Job Manager stopped")
 
     async def queue_ocr_job(
         self,
@@ -64,17 +57,14 @@ class OCRJobManager:
         app_context: Dict[str, Any],
         priority: JobPriority = JobPriority.NORMAL
     ) -> str:
-        """Queue a new OCR job"""
         job_id = str(uuid.uuid4())
 
         try:
-            # Use the session_id provided from the frontend
             session_id = app_context.get("session_id")
 
             if not session_id:
                 raise Exception("No session_id provided in app_context")
 
-            # Store job in ocr_events table with image data
             job_data = {
                 "id": job_id,
                 "session_id": session_id,
@@ -100,73 +90,54 @@ class OCRJobManager:
                 }
             }
 
-            # Insert job into database
             result = supabase.table("ocr_events").insert(job_data).execute()
 
-            # Store image data in memory for processing (in production, use Supabase Storage)
             self._store_image_data(job_id, image_data)
 
-            print(f"📋 Queued OCR job {job_id} for {app_context.get('app_name')} ({len(image_data)} bytes)")
             return job_id
 
         except Exception as e:
-            print(f"❌ Failed to queue OCR job: {e}")
             raise
 
     def _store_image_data(self, job_id: str, image_data: bytes):
-        """Store image data temporarily for processing"""
         if not hasattr(self, '_image_store'):
             self._image_store = {}
         self._image_store[job_id] = image_data
 
     def _get_image_data(self, job_id: str) -> Optional[bytes]:
-        """Retrieve stored image data"""
         if not hasattr(self, '_image_store'):
             return None
         return self._image_store.get(job_id)
 
     def _cleanup_image_data(self, job_id: str):
-        """Clean up stored image data after processing"""
         if hasattr(self, '_image_store') and job_id in self._image_store:
             del self._image_store[job_id]
 
     async def _worker_loop(self, worker_id: str):
-        """Main worker loop for processing jobs"""
-        print(f"👷 Worker {worker_id} started")
-
-        # Initialize OCR service for this worker
-        print(f"👷 Worker {worker_id} initializing OCR service...")
         self.ocr_services[worker_id] = PaddleOCRService()
-        print(f"✅ Worker {worker_id} OCR service ready")
 
         while self.is_running:
             try:
-                # Get next pending job
                 job = await self._get_next_job(worker_id)
 
                 if job:
+
+                    print('we are processing something')
                     await self._process_job(worker_id, job)
                 else:
-                    # No jobs available, wait a bit
                     await asyncio.sleep(1)
 
             except asyncio.CancelledError:
-                print(f"👷 Worker {worker_id} cancelled")
                 break
             except Exception as e:
-                print(f"❌ Worker {worker_id} error: {e}")
                 traceback.print_exc()
-                await asyncio.sleep(5)  # Wait before retrying
+                await asyncio.sleep(5)
 
-        # Cleanup worker's OCR service
         if worker_id in self.ocr_services:
             del self.ocr_services[worker_id]
-        print(f"👷 Worker {worker_id} stopped")
 
     async def _get_next_job(self, worker_id: str) -> Optional[Dict]:
-        """Get the next pending job for processing"""
         try:
-            # Get highest priority pending job
             result = supabase.table("ocr_events").select("*").eq(
                 "job_status", JobStatus.PENDING.value
             ).order("job_priority", desc=True).order("created_at").limit(1).execute()
@@ -177,7 +148,6 @@ class OCRJobManager:
             job = result.data[0]
             job_id = job["id"]
 
-            # Claim the job
             update_result = supabase.table("ocr_events").update({
                 "job_status": JobStatus.PROCESSING.value,
                 "processing_worker_id": worker_id,
@@ -187,53 +157,52 @@ class OCRJobManager:
             if update_result.data:
                 return update_result.data[0]
             else:
-                # Job was claimed by another worker
                 return None
 
         except Exception as e:
-            print(f"❌ Error getting next job: {e}")
             return None
 
     async def _process_job(self, worker_id: str, job: Dict):
-        """Process a single OCR job"""
         job_id = job["id"]
+        print(f"🔄 Worker {worker_id} processing job {job_id}")
+        from app.routers.ai import extract_meaningful_context, extract_session_context
+
 
         try:
-            print(f"🔄 Worker {worker_id} processing job {job_id}")
-
-            # Retrieve image data
             image_data = self._get_image_data(job_id)
             if not image_data:
                 raise Exception(f"No image data found for job {job_id}")
 
-            # Extract text using worker's dedicated OCR service
             worker_ocr = self.ocr_services.get(worker_id)
             if not worker_ocr:
                 raise Exception(f"No OCR service initialized for worker {worker_id}")
 
             text_lines = await asyncio.to_thread(worker_ocr.process_image, image_data)
 
-            print(f"📝 Extracted {len(text_lines)} text lines from job {job_id}")
+            print(f"✅ OCR completed: {len(text_lines)} text lines extracted")
 
-            # Extract meaningful context from OCR text
-            from app.routers.ai import extract_meaningful_context
             meaningful_context = ""
+            session_context_data = {}
             try:
                 meaningful_context = await extract_meaningful_context(
                     text_lines,
                     job.get("app_name", ""),
                     job.get("window_title", "")
                 )
-                print(f"📝 Meaningful context extracted for job {job_id}: {meaningful_context[:100]}...")
-            except Exception as e:
-                print(f"⚠️ Failed to extract meaningful context for job {job_id}: {e}")
-                meaningful_context = ""
 
-            # Detect interaction context and entities
+                session_context_data = await extract_session_context(
+                    text_lines,
+                    job.get("app_name", ""),
+                    job.get("window_title", "")
+                )
+            except Exception as e:
+                print(f"⚠️ Failed to extract meaningful context for job {job['id']}: {e}")
+                meaningful_context = ""
+                session_context_data = {}
+
             interaction_context = self._analyze_interaction_context(job, text_lines)
             extracted_entities = self._extract_entities(text_lines, job)
 
-            # Update job as completed
             completion_data = {
                 "job_status": JobStatus.COMPLETED.value,
                 "completed_at": datetime.now(timezone.utc).isoformat(),
@@ -244,27 +213,21 @@ class OCRJobManager:
             }
 
             supabase.table("ocr_events").update(completion_data).eq("id", job_id).execute()
+            print(f"💾 OCR results saved to database")
 
-            # Emit WebSocket notification for job completion
             await self._emit_job_completion_websocket(job, text_lines, extracted_entities, meaningful_context)
+            print(f"📡 OCR results sent via websocket")
 
-            # Trigger additional processing
-            await self._post_process_job(job, text_lines, extracted_entities)
+            await self._post_process_job(job, text_lines, extracted_entities, session_context_data)
 
-            # Clean up image data
             self._cleanup_image_data(job_id)
 
-            print(f"✅ Worker {worker_id} completed job {job_id}")
-
         except Exception as e:
-            print(f"❌ Worker {worker_id} failed job {job_id}: {e}")
 
-            # Mark job as failed
             retry_count = job.get("retry_count", 0) + 1
             max_retries = 3
 
             if retry_count < max_retries:
-                # Retry the job
                 supabase.table("ocr_events").update({
                     "job_status": JobStatus.PENDING.value,
                     "processing_worker_id": None,
@@ -272,37 +235,29 @@ class OCRJobManager:
                     "error_message": str(e)
                 }).eq("id", job_id).execute()
             else:
-                # Mark as permanently failed
                 supabase.table("ocr_events").update({
                     "job_status": JobStatus.FAILED.value,
                     "completed_at": datetime.now(timezone.utc).isoformat(),
                     "error_message": str(e)
                 }).eq("id", job_id).execute()
 
-                # Clean up image data even on failure
                 self._cleanup_image_data(job_id)
 
     def _detect_application_type(self, app_context: Dict) -> str:
-        """Detect general application type based on context"""
         app_name = app_context.get("app_name", "").lower()
 
-        # Creative applications
         if any(app in app_name for app in ["blender", "figma", "photoshop", "illustrator", "sketch"]):
             return "creative"
 
-        # Development applications
         elif any(app in app_name for app in ["code", "xcode", "intellij", "terminal", "git"]):
             return "development"
 
-        # Productivity applications
         elif any(app in app_name for app in ["notion", "obsidian", "word", "excel", "powerpoint"]):
             return "productivity"
 
-        # Communication applications
         elif any(app in app_name for app in ["slack", "discord", "teams", "zoom", "mail"]):
             return "communication"
 
-        # Web browsers
         elif any(app in app_name for app in ["chrome", "firefox", "safari", "edge"]):
             return "browser"
 
@@ -310,14 +265,11 @@ class OCRJobManager:
             return "other"
 
     def _analyze_interaction_context(self, job: Dict, text_lines: List[str]) -> str:
-        """Analyze what type of interaction is happening"""
-        # Analyze OCR results to determine interaction context
         if not text_lines:
             return "idle"
 
         text_content = " ".join(text_lines).lower()
 
-        # Check for common UI patterns
         if any(keyword in text_content for keyword in ["menu", "file", "edit", "view", "help"]):
             return "menu_navigation"
         elif any(keyword in text_content for keyword in ["error", "warning", "failed", "exception"]):
@@ -332,12 +284,9 @@ class OCRJobManager:
             return "active_work"
 
     def _extract_entities(self, text_lines: List[str], job: Dict) -> List[Dict]:
-        """Extract entities from OCR text"""
         entities = []
 
-        # Extract entities from text
         for line in text_lines:
-            # Simple entity extraction (would be much more sophisticated)
             if any(keyword in line.lower() for keyword in ["project", "task", "todo"]):
                 entities.append({
                     "type": "task",
@@ -347,55 +296,204 @@ class OCRJobManager:
 
         return entities
 
-    async def _post_process_job(self, job: Dict, text_lines: List[str], extracted_entities: List[Dict]):
-        """Additional processing after OCR completion"""
+    async def _post_process_job(self, job: Dict, text_lines: List[str], extracted_entities: List[Dict], session_context_data: Dict = None):
         try:
-            # Update user session
+            await self._update_app_session(job, session_context_data or {})
+
             await self._update_user_session(job, text_lines)
 
-            # Update knowledge graph
             await self._update_knowledge_graph(job, extracted_entities)
 
-            # Generate suggestions if appropriate
             await self._generate_suggestions(job, text_lines, extracted_entities)
 
         except Exception as e:
-            print(f"❌ Post-processing error for job {job['id']}: {e}")
+            pass
+
+    async def _update_app_session(self, job: Dict, session_context_data: Dict):
+        try:
+            from app.services.app_session_service import AppSessionService
+
+            context_data = job.get("context_data", {})
+            user_id = context_data.get("user_id")
+            session_id = job.get("session_id")
+
+            if not user_id or not session_id:
+                return
+
+            await AppSessionService.create_or_update_app_session(
+                user_id=user_id,
+                session_id=session_id,
+                app_name=job.get("app_name", "Unknown"),
+                window_title=job.get("window_title", ""),
+                bundle_id=job.get("bundle_id", ""),
+                context_type=session_context_data.get("context_type", "general"),
+                domain=session_context_data.get("domain", "general"),
+                activity_summary=session_context_data.get("activity_summary", "")
+            )
+
+        except Exception as e:
+            pass
 
     async def _update_user_session(self, job: Dict, text_lines: List[str]):
-        """Update current user session with job context"""
-        # Implementation for session tracking
         pass
 
     async def _update_knowledge_graph(self, job: Dict, extracted_entities: List[Dict]):
-        """Update knowledge graph with extracted entities"""
-        # Implementation for knowledge graph updates
-        pass
-
-    async def _generate_suggestions(self, job: Dict, text_lines: List[str], extracted_entities: List[Dict]):
-        """Generate AI suggestions based on current context"""
-        # Implementation for suggestion generation
-        pass
-
-    async def _emit_job_completion_websocket(self, job: Dict, text_lines: List[str], extracted_entities: List[Dict], meaningful_context: str = ""):
-        """Emit WebSocket notification for job completion"""
         try:
-            # Extract user_id from the session_id (assuming user_id is part of session_id)
-            session_id = job.get("session_id")
-            if not session_id:
-                print(f"⚠️ No session_id found for job {job['id']}, cannot emit WebSocket event")
+            from app.core.database import supabase
+            from app.routers.ai import get_openai_client
+
+            context_data = job.get("context_data", {})
+            user_id = context_data.get("user_id")
+
+            if not user_id:
                 return
 
-            # Extract user_id from context_data - this should be provided when queuing the job
+            ocr_text = job.get("ocr_text", [])
+            meaningful_context = job.get("meaningful_context", "")
+
+            if not ocr_text or len(ocr_text) == 0:
+                print("⚠️ No OCR text for knowledge graph")
+                return
+
+            print(f"🧠 Processing OCR for knowledge graph: {len(ocr_text)} lines")
+
+            client = get_openai_client()
+            if not client:
+                print("❌ No OpenAI client for knowledge graph")
+                return
+
+            content = '\n'.join(ocr_text[:50])
+
+            prompt = f"""Analyze this user's screen content and extract knowledge graph insights about their work patterns, goals, habits, and expertise.
+
+APP: {job.get("app_name", "")}
+WINDOW: {job.get("window_title", "")}
+CONTEXT: {meaningful_context}
+
+SCREEN CONTENT:
+{content}
+
+Extract insights in these categories:
+
+1. HABITS - Recurring work patterns (e.g., "reviews pull requests in the morning", "tests code before committing")
+2. SKILLS - Technical or domain expertise demonstrated (e.g., "proficient in React hooks", "experienced with SQL optimization")
+3. GOALS - Stated or implied objectives (e.g., "building authentication system", "learning TypeScript")
+4. WORKFLOWS - Multi-step processes they follow (e.g., "writes tests before implementation", "uses git branches for features")
+5. PREFERENCES - Tool usage patterns or work style (e.g., "prefers dark mode", "uses keyboard shortcuts extensively")
+6. PATTERNS - Notable behavioral patterns (e.g., "debugs by adding console logs", "references documentation frequently")
+
+Return JSON with only the insights that are clearly evident from the content. Each insight should be specific and actionable.
+
+Format:
+{{
+  "habits": [
+    {{"description": "specific habit", "confidence": 0.8}}
+  ],
+  "skills": [
+    {{"description": "specific skill with evidence", "proficiency": "beginner|intermediate|advanced", "confidence": 0.7}}
+  ],
+  "goals": [
+    {{"description": "specific goal", "timeframe": "short|medium|long", "confidence": 0.6}}
+  ],
+  "workflows": [
+    {{"description": "specific workflow pattern", "confidence": 0.8}}
+  ],
+  "preferences": [
+    {{"description": "specific preference", "confidence": 0.7}}
+  ],
+  "patterns": [
+    {{"description": "specific behavioral pattern", "confidence": 0.7}}
+  ]
+}}
+
+Only include insights with confidence > 0.6. Return empty arrays if no clear insights are found.
+"""
+
+            try:
+                response = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3,
+                    max_tokens=500
+                )
+
+                result_text = response.choices[0].message.content.strip()
+
+                import json
+                if result_text.startswith("```"):
+                    result_text = result_text.split("```")[1]
+                    if result_text.startswith("json"):
+                        result_text = result_text[4:]
+                result_text = result_text.strip()
+
+                insights = json.loads(result_text)
+                print(f"✅ Knowledge graph insights extracted from OCR")
+
+                node_type_mapping = {
+                    "habits": "habit",
+                    "skills": "skill",
+                    "goals": "goal",
+                    "workflows": "workflow",
+                    "preferences": "preference",
+                    "patterns": "pattern"
+                }
+
+                for category, node_type in node_type_mapping.items():
+                    items = insights.get(category, [])
+                    for item in items[:2]:
+                        try:
+                            confidence = item.get("confidence", 0.7)
+                            if confidence < 0.6:
+                                continue
+
+                            content_data = {
+                                "description": item.get("description", ""),
+                                "source": "llm_analysis",
+                                "context": {
+                                    "app": job.get("app_name"),
+                                    "window": job.get("window_title"),
+                                    "timestamp": job.get("created_at")
+                                }
+                            }
+
+                            if "proficiency" in item:
+                                content_data["proficiency"] = item["proficiency"]
+                            if "timeframe" in item:
+                                content_data["timeframe"] = item["timeframe"]
+
+                            supabase.rpc(
+                                "upsert_knowledge_node",
+                                {
+                                    "p_user_id": user_id,
+                                    "p_node_type": node_type,
+                                    "p_content": content_data,
+                                    "p_weight": confidence,
+                                    "p_metadata": {
+                                        "confidence": confidence,
+                                        "extracted_at": job.get("created_at"),
+                                        "source_job_id": job.get("id")
+                                    }
+                                }
+                            ).execute()
+
+                        except Exception as e:
+                            pass
+
+            except Exception as e:
+                pass
+
+        except Exception as e:
+            pass
+
+    async def _emit_job_completion_websocket(self, job: Dict, text_lines: List[str], extracted_entities: List[Dict], meaningful_context: str = ""):
+        try:
+            session_id = job.get("session_id")
+            if not session_id:
+                return
+
             context_data = job.get("context_data", {})
-            user_id = context_data.get("user_id") or "550e8400-e29b-41d4-a716-446655440000"  # fallback to known user
+            user_id = context_data.get("user_id") or "550e8400-e29b-41d4-a716-446655440000"
 
-            # Debug logging
-            print(f"🔍 OCR Job {job['id']} - Session ID: {session_id}")
-            print(f"🔍 OCR Job {job['id']} - Context data: {context_data}")
-            print(f"🔍 OCR Job {job['id']} - Extracted user_id: {user_id}")
-
-            # Prepare job completion data
             job_data = {
                 "job_id": job["id"],
                 "session_id": session_id,
@@ -413,29 +511,19 @@ class OCRJobManager:
                 "completed_at": job.get("completed_at")
             }
 
-            # Emit to user room
-            success = await ws_manager.emit_ocr_job_complete(user_id, job_data)
-
-            if success:
-                print(f"📡 Emitted WebSocket OCR completion for job {job['id']} to user {user_id}")
-            else:
-                print(f"⚠️ Failed to emit WebSocket OCR completion for job {job['id']} (no active connections)")
+            await ws_manager.emit_ocr_job_complete(user_id, job_data)
 
         except Exception as e:
-            print(f"❌ Error emitting WebSocket OCR completion for job {job['id']}: {e}")
-            # Don't re-raise - this is not critical for job completion
+            pass
 
     async def get_job_status(self, job_id: str) -> Optional[Dict]:
-        """Get the status of a specific job"""
         try:
             result = supabase.table("ocr_events").select("*").eq("id", job_id).execute()
             return result.data[0] if result.data else None
         except Exception as e:
-            print(f"❌ Error getting job status: {e}")
             return None
 
     async def get_queue_stats(self) -> Dict:
-        """Get current queue statistics"""
         try:
             pending = supabase.table("ocr_events").select("id", count="exact").eq(
                 "job_status", JobStatus.PENDING.value
@@ -452,7 +540,5 @@ class OCRJobManager:
                 "is_running": self.is_running
             }
         except Exception as e:
-            print(f"❌ Error getting queue stats: {e}")
             return {}
 
-    # Removed SSE emission method - will use WebSocket for real-time notifications

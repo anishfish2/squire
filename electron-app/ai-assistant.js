@@ -1,6 +1,6 @@
 class AIAssistant {
   constructor() {
-    this.backendUrl = 'http://127.0.0.1:8000';
+    this.backendUrl = 'http:
     this.userContext = {
       preferences: {},
       recentApps: new Map(),
@@ -11,24 +11,18 @@ class AIAssistant {
       }
     };
 
-    // Suggestion cooldown system
     this.suggestionCooldown = {
       lastSuggestionTime: 0,
-      minCooldownMs: 15000, // 15 seconds minimum between suggestions
-      recentSuggestions: [], // Track recent suggestions for duplicate detection
+      minCooldownMs: 15000,
+      recentSuggestions: [],
       maxRecentSuggestions: 5
     };
 
-    // Set up logging
     this.setupLogging();
 
-    // AI Assistant initialized
-    // Backend URL set
 
-    // Test backend connectivity
     this.testBackendConnection();
 
-    // Initialize SSE connection
     this.eventSource = null;
     this.sessionId = null;
   }
@@ -58,7 +52,6 @@ class AIAssistant {
 
       this.eventSource.onerror = (error) => {
         this.log('❌ SSE connection error:', error);
-        // Attempt to reconnect after a delay
         setTimeout(() => {
           if (this.sessionId) {
             this.initializeSSE(this.sessionId);
@@ -101,7 +94,6 @@ class AIAssistant {
   processBatchSuggestions(suggestions, sequenceMetadata) {
     this.log(`🤖 Processing ${suggestions.length} batch suggestions`);
 
-    // Display suggestions using existing notification system
     suggestions.forEach((suggestion, index) => {
       setTimeout(() => {
         if (global.aiOverlayManager && global.aiOverlayManager.showSuggestion) {
@@ -118,7 +110,7 @@ class AIAssistant {
             }
           });
         }
-      }, index * 1000); // Stagger suggestions by 1 second
+      }, index * 1000);
     });
   }
 
@@ -136,31 +128,24 @@ class AIAssistant {
     const os = require('os');
 
     this.logFile = path.join(os.homedir(), 'squire-debug.log');
-    // Logging configured
   }
 
   log(...args) {
-    // Logging disabled for cleaner output
   }
 
   async testBackendConnection() {
     try {
-      // Test backend
       const response = await this.makeHttpRequest(`${this.backendUrl}/api/ai/health`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
         }
       });
-      // Backend connected
     } catch (error) {
-      // Backend connection failed
-      // Check backend
     }
   }
 
   updateUserContext(appInfo) {
-    // Track app usage
     if (appInfo.appName) {
       const now = Date.now();
       const appData = this.userContext.recentApps.get(appInfo.appName) || {
@@ -169,7 +154,6 @@ class AIAssistant {
         lastSeen: now
       };
 
-      // Calculate time spent if we have a previous timestamp
       if (appData.lastSeen) {
         appData.timeSpent += now - appData.lastSeen;
       }
@@ -185,21 +169,18 @@ class AIAssistant {
     const now = new Date();
     const sessionDuration = Date.now() - this.userContext.sessionData.startTime;
 
-    // Convert app usage map to object
     const appUsage = {};
     this.userContext.recentApps.forEach((data, appName) => {
       appUsage[appName] = {
-        time_spent: Math.round(data.timeSpent / 1000), // seconds
+        time_spent: Math.round(data.timeSpent / 1000),
         switches: data.switches
       };
     });
 
-    // Determine time of day and focus state
     const hour = now.getHours();
     const timeOfDay = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
     const dayOfWeek = now.getDay() === 0 || now.getDay() === 6 ? 'weekend' : 'weekday';
 
-    // Analyze stress indicators
     const recentSwitches = this.userContext.sessionData.appSwitches;
     const sessionMinutes = sessionDuration / (1000 * 60);
     const switchRate = sessionMinutes > 0 ? recentSwitches / sessionMinutes : 0;
@@ -218,7 +199,7 @@ class AIAssistant {
       session_start: new Date(this.userContext.sessionData.startTime).toISOString(),
       current_app: appInfo.appName || 'Unknown',
       window_title: appInfo.windowTitle || '',
-      recent_ocr_text: ocrResults.slice(0, 20), // Last 20 lines
+      recent_ocr_text: ocrResults.slice(0, 20),
       app_usage: appUsage,
       session_duration_minutes: Math.round(sessionMinutes)
     };
@@ -227,13 +208,13 @@ class AIAssistant {
       time_of_day: timeOfDay,
       day_of_week: dayOfWeek,
       stress_indicators: {
-        rapid_app_switching: switchRate > 2, // More than 2 switches per minute
+        rapid_app_switching: switchRate > 2,
         session_length: sessionMinutes,
       },
     };
 
     const recent_ocr_context = {
-      text_lines: ocrResults, // Send all OCR lines, backend will handle truncation
+      text_lines: ocrResults,
       workflow_indicators: this.analyzeWorkflowSignals(ocrResults)
     };
 
@@ -246,10 +227,8 @@ class AIAssistant {
   }
 
   buildEnhancedContextForOpenAI(appInfo, ocrResults) {
-    // Start with base context
     const baseContext = this.buildContextForOpenAI(appInfo, ocrResults);
 
-    // Add comprehensive activity data if available
     const activityContext = this.buildActivityContext(appInfo.recentActivity);
 
     return {
@@ -268,9 +247,8 @@ class AIAssistant {
 
     const { events = [], sessionStats = {}, mouseMovementSummary = null } = recentActivity;
 
-    // Analyze event patterns
     const eventsByType = {};
-    const recentEvents = events.slice(-20); // Last 20 events
+    const recentEvents = events.slice(-20);
 
     recentEvents.forEach(event => {
       if (!eventsByType[event.type]) {
@@ -279,17 +257,14 @@ class AIAssistant {
       eventsByType[event.type].push(event);
     });
 
-    // Build habit patterns
     const habitPatterns = this.analyzeHabitPatterns(recentEvents);
 
-    // Mouse activity analysis
     const mouseActivity = mouseMovementSummary ? {
       pattern: mouseMovementSummary.movementPattern,
       velocity: mouseMovementSummary.averageVelocity,
       activity_level: this.categorizeMouseActivity(mouseMovementSummary.averageVelocity)
     } : null;
 
-    // Keystroke patterns
     const keystrokeEvents = eventsByType['keystroke'] || [];
     const keystrokePatterns = this.analyzeKeystrokePatterns(keystrokeEvents);
 
@@ -326,21 +301,18 @@ class AIAssistant {
     const appSwitches = events.filter(e => e.type === 'app_switch');
     const keystrokes = events.filter(e => e.type === 'keystroke');
 
-    // App switching frequency
     if (appSwitches.length > 5) {
       patterns.app_switching_frequency = 'high';
     } else if (appSwitches.length < 2) {
       patterns.app_switching_frequency = 'low';
     }
 
-    // Work intensity based on keystroke frequency
     if (keystrokes.length > 10) {
       patterns.work_intensity = 'high';
     } else if (keystrokes.length < 3) {
       patterns.work_intensity = 'low';
     }
 
-    // Multitasking level
     const uniqueApps = new Set(appSwitches.map(e => e.data?.toApp)).size;
     if (uniqueApps > 3) {
       patterns.multitasking_level = 'high';
@@ -366,7 +338,6 @@ class AIAssistant {
       shortcutCounts[shortcut] = (shortcutCounts[shortcut] || 0) + 1;
     });
 
-    // Find most used shortcuts
     const topShortcuts = Object.entries(shortcutCounts)
       .sort(([,a], [,b]) => b - a)
       .slice(0, 3)
@@ -424,36 +395,30 @@ class AIAssistant {
   determineFocusState(appName, ocrResults, switchRate) {
     if (switchRate > 3) return 'distracted';
 
-    // Return focused state and let the AI figure out the context
     return 'focused';
   }
 
 
   analyzeWorkflowSignals(ocrResults) {
-    // Just detect basic content characteristics, let AI determine meaning
     const text = ocrResults.join(' ').toLowerCase();
 
     return {
-      has_structured_content: /•|\*|-|\d+\./.test(text), // bullets, lists, numbers
+      has_structured_content: /•|\*|-|\d+\./.test(text),
       has_questions: /\?/.test(text),
-      has_numbers_data: /\d+%|\$\d+|\d+,\d+/.test(text), // percentages, money, large numbers
+      has_numbers_data: /\d+%|\$\d+|\d+,\d+/.test(text),
       has_dates_times: /\d{1,2}\/\d{1,2}|\d{4}|:\d{2}/.test(text),
       has_long_content: text.length > 500,
       has_many_lines: ocrResults.length > 10
     };
   }
 
-  // Suggestion Cooldown System
   shouldGenerateSuggestion(ocrResults) {
     const now = Date.now();
 
-    // Check time-based cooldown
     if (now - this.suggestionCooldown.lastSuggestionTime < this.suggestionCooldown.minCooldownMs) {
-      // Cooldown active
       return false;
     }
 
-    // Check for similar content to avoid duplicate suggestions
     if (this.isSimilarToRecentContent(ocrResults)) {
       this.log('🔄 Content too similar to recent OCR, skipping suggestion');
       return false;
@@ -467,10 +432,9 @@ class AIAssistant {
       return false;
     }
 
-    // Check if current content is similar to any recent suggestion context
     for (const recent of this.suggestionCooldown.recentSuggestions) {
       const similarity = this.calculateContentSimilarity(recent.ocrContent, currentContent);
-      if (similarity > 0.7) { // 70% similarity threshold
+      if (similarity > 0.7) {
         return true;
       }
     }
@@ -483,7 +447,6 @@ class AIAssistant {
       return 0;
     }
 
-    // Simple similarity based on shared lines
     const set1 = new Set(content1.map(line => line.trim().toLowerCase()));
     const set2 = new Set(content2.map(line => line.trim().toLowerCase()));
 
@@ -498,24 +461,20 @@ class AIAssistant {
   trackSuggestion(suggestions, ocrContent) {
     const now = Date.now();
 
-    // Update last suggestion time
     this.suggestionCooldown.lastSuggestionTime = now;
 
-    // Add to recent suggestions
     const suggestionRecord = {
       timestamp: now,
       suggestions: suggestions.map(s => ({ type: s.type, title: s.title })),
-      ocrContent: [...ocrContent] // Copy content for similarity checking
+      ocrContent: [...ocrContent]
     };
 
     this.suggestionCooldown.recentSuggestions.push(suggestionRecord);
 
-    // Keep only recent suggestions
     if (this.suggestionCooldown.recentSuggestions.length > this.suggestionCooldown.maxRecentSuggestions) {
       this.suggestionCooldown.recentSuggestions.shift();
     }
 
-    // Track suggestion
   }
 
   async processBatchRequest(batchRequest) {
@@ -538,9 +497,7 @@ class AIAssistant {
 
       const suggestions = response.suggestions || [];
 
-      // Track suggestions for cooldown system
       if (suggestions.length > 0) {
-        // Use combined OCR content from all apps in batch
         const combinedOCR = batchRequest.app_sequence.flatMap(app => app.ocrText || []);
         this.trackSuggestion(suggestions, combinedOCR);
       }
@@ -554,11 +511,8 @@ class AIAssistant {
   }
 
   async generateSuggestions(appInfo, ocrResults) {
-    // Generate suggestions
 
-    // Check cooldown
     if (!this.shouldGenerateSuggestion(ocrResults)) {
-      // Suggestion skipped
       return [];
     }
 
@@ -566,7 +520,6 @@ class AIAssistant {
       this.updateUserContext(appInfo);
       const context = this.buildEnhancedContextForOpenAI(appInfo, ocrResults);
 
-      // Generate a static user ID for now (in production, this would come from authentication)
       const userId = "550e8400-e29b-41d4-a716-446655440000";
 
       this.log("user_id" + userId);
@@ -583,7 +536,6 @@ class AIAssistant {
         activity_context: context.activity_context
       };
 
-      // Request AI suggestions
       this.log('📊 Context:', JSON.stringify({
         app: appInfo.appName,
         ocrLines: ocrResults.length,
@@ -592,7 +544,6 @@ class AIAssistant {
       }));
       this.log('📤 Request payload size:', JSON.stringify(requestData).length, 'bytes');
 
-      // Make HTTP request to backend using the new context endpoint
       this.log('📡 Making HTTP request to:', `${this.backendUrl}/api/ai/context`);
       this.log("requestData userid" + requestData.user_id);
       const response = await this.makeHttpRequest(`${this.backendUrl}/api/ai/context`, {
@@ -611,7 +562,6 @@ class AIAssistant {
 
       const suggestions = response.suggestions || [];
 
-      // Track suggestions for cooldown system
       if (suggestions.length > 0) {
         this.trackSuggestion(suggestions, ocrResults);
       }
@@ -686,7 +636,6 @@ class AIAssistant {
         req.write(options.body);
       }
 
-      // No timeout - let requests complete naturally
 
       req.end();
     });

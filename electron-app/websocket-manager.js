@@ -6,12 +6,11 @@ class WebSocketManager {
     this.isConnected = false;
     this.userId = null;
     this.sessionId = null;
-    this.backendUrl = 'http://127.0.0.1:8000';
+    this.backendUrl = 'http:
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 5;
     this.reconnectDelay = 1000;
 
-    // Event handlers
     this.eventHandlers = new Map();
 
     console.log('🔌 WebSocket Manager initialized');
@@ -38,7 +37,6 @@ class WebSocketManager {
         timeout: 10000
       });
 
-      // Set up event listeners
       this._setupEventListeners();
 
       return new Promise((resolve, reject) => {
@@ -53,7 +51,6 @@ class WebSocketManager {
           this.reconnectAttempts = 0;
           console.log('✅ WebSocket connected successfully');
 
-          // Join user room
           this._joinUserRoom();
           resolve(true);
         });
@@ -85,7 +82,6 @@ class WebSocketManager {
       console.log('🔌 WebSocket disconnected:', reason);
 
       if (reason === 'io server disconnect') {
-        // Server initiated disconnect, reconnect manually
         this._attemptReconnect();
       }
     });
@@ -95,41 +91,34 @@ class WebSocketManager {
       this._attemptReconnect();
     });
 
-    // Handle connection confirmation
     this.socket.on('connected', (data) => {
       console.log('📡 WebSocket connection confirmed:', data);
     });
 
-    // Handle room join confirmation
     this.socket.on('room_joined', (data) => {
       console.log('🏠 Joined WebSocket rooms:', data.rooms);
     });
 
-    // Handle OCR job completion
     this.socket.on('ocr_job_complete', (data) => {
       console.log('🎉 OCR job completed via WebSocket:', data.job_id);
       this._emitEvent('ocr_job_complete', data);
     });
 
-    // Handle batch progress updates
     this.socket.on('batch_progress', (data) => {
       console.log('📊 Batch progress update:', data);
       this._emitEvent('batch_progress', data);
     });
 
-    // Handle batch completion
     this.socket.on('batch_complete', (data) => {
       console.log('🎉 Batch completed via WebSocket:', data.session_id);
       this._emitEvent('batch_complete', data);
     });
 
-    // Handle errors
     this.socket.on('error', (error) => {
       console.log('❌ WebSocket error:', error);
       this._emitEvent('error', error);
     });
 
-    // Handle pong responses
     this.socket.on('pong', (data) => {
       console.log('🏓 WebSocket pong received:', data);
     });
@@ -177,7 +166,6 @@ class WebSocketManager {
     }
   }
 
-  // Public event subscription methods
   onOCRJobComplete(handler) {
     this.addEventListener('ocr_job_complete', handler);
   }
@@ -211,7 +199,6 @@ class WebSocketManager {
     }
   }
 
-  // Utility methods
   ping() {
     if (this.socket && this.isConnected) {
       this.socket.emit('ping', { timestamp: Date.now() });
@@ -247,7 +234,6 @@ class WebSocketManager {
     this.reconnectAttempts = 0;
   }
 
-  // Getters
   get connected() {
     return this.isConnected;
   }

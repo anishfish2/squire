@@ -1,4 +1,3 @@
-// app-tracker.js
 const ActiveWindow = require('@paymoapp/active-window').default;
 
 ActiveWindow.initialize();
@@ -25,7 +24,6 @@ class ActiveAppTracker {
 
       console.log('🔍 Starting active window tracking...');
 
-      // Get the current active window once
       try {
         const win = await ActiveWindow.getActiveWindow();
         console.log('Window title:', win.title);
@@ -41,7 +39,6 @@ class ActiveAppTracker {
         console.error('❌ Error getting initial window:', err);
       }
 
-      // Subscribe for changes (real-time notifications)
       this.watchId = ActiveWindow.subscribe((winInfo) => {
         if (!winInfo) return;
         this.currentWindow = winInfo;
@@ -72,7 +69,7 @@ class ActiveAppTracker {
       appName: winInfo.application,
       windowTitle: winInfo.title,
       processId: winInfo.pid,
-      iconBase64: winInfo.icon // @paymoapp/active-window provides base64 PNG
+      iconBase64: winInfo.icon
     };
 
     console.log(`🔄 Focus changed → ${payload.appName} | ${payload.windowTitle}`);
@@ -81,32 +78,8 @@ class ActiveAppTracker {
       this.onAppChange(payload);
     }
 
-    // this._scheduleOCR();
   }
 
-  // _scheduleOCR() {
-  //   if (this.pendingOCR) clearTimeout(this.pendingOCR);
-  //
-  //   this.pendingOCR = setTimeout(async () => {
-  //     if (!this.ocrManager) return;
-  //     console.log('📸 Running OCR after app change…');
-  //
-  //     try {
-  //       const ocrResults = await this.ocrManager.captureAndRecognize();
-  //       if (this.onAppChange && this.currentWindow) {
-  //         this.onAppChange({
-  //           appName: this.currentWindow.application,
-  //           windowTitle: this.currentWindow.title,
-  //           ocrResults
-  //         });
-  //       }
-  //     } catch (err) {
-  //       console.error('❌ OCR error:', err);
-  //     }
-  //
-  //     this.pendingOCR = null;
-  //   }, 500);
-  // }
 
   getCurrentApp() {
     if (!this.currentWindow) return null;

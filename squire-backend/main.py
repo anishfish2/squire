@@ -1,7 +1,3 @@
-"""
-Squire Backend API - FastAPI Implementation
-OCR tracking, AI suggestions, and knowledge graph
-"""
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -11,10 +7,8 @@ import os
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
-# Load environment variables explicitly
 load_dotenv()
 
-# Import routers and services
 from app.routers import ai, activity, websocket
 from app.services.websocket_manager import ws_manager
 from app.core.config import settings
@@ -24,15 +18,22 @@ import socketio
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
     print("🚀 Starting Squire Backend API...")
     print("🔌 WebSocket Manager ready for connections")
+
+    # Start OCR job manager
+    print("🔄 Starting OCR job manager...")
+    await ai.ocr_job_manager.start()
+    print("✅ OCR job manager started")
+
     yield
-    # Shutdown
+
+    # Stop OCR job manager
+    print("🛑 Stopping OCR job manager...")
+    await ai.ocr_job_manager.stop()
     print("🛑 Shutting down Squire Backend API...")
 
 
-# Create FastAPI app
 app = FastAPI(
     title="Squire Backend API",
     description="Complete API for OCR tracking, AI suggestions, and knowledge graph",
@@ -42,7 +43,6 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_ORIGINS,
@@ -51,45 +51,43 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Trusted host middleware
 if settings.ALLOWED_HOSTS:
     app.add_middleware(
         TrustedHostMiddleware,
         allowed_hosts=settings.ALLOWED_HOSTS
     )
 
-# Include routers
 app.include_router(ai.router, prefix="/api/ai", tags=["ai"])
 app.include_router(activity.router, prefix="/api/activity", tags=["activity"])
 app.include_router(websocket.router, prefix="/api/ws", tags=["websockets"])
 
-# Create combined ASGI app with SocketIO support
 socket_app = socketio.ASGIApp(ws_manager.sio, app)
 
 
 @app.get("/")
 async def root():
-    """API root endpoint"""
     return {
         "message": "Squire Backend API",
         "version": "1.0.0",
         "documentation": "/docs",
         "routes": {
-            "ai_suggestions": "/api/ai/suggestions",
-            "ai_context": "/api/ai/context",
+            "ocr_queue": "/api/ai/ocr/queue/context",
+            "batch_context": "/api/ai/batch-context",
+            "ocr_job_status": "/api/ai/ocr/job/{job_id}",
+            "ocr_queue_stats": "/api/ai/ocr/queue/stats",
             "ai_health": "/api/ai/health",
             "activity_batch": "/api/activity/activity-batch",
             "session_stats": "/api/activity/session-stats",
-            "recent_activity": "/api/activity/recent-activity/{user_id}"
+            "profiles": "/api/activity/profiles",
+            "sessions": "/api/activity/sessions",
+            "websocket_stats": "/api/ws/stats"
         }
     }
 
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
     try:
-        # Test database connection
         response = await supabase.rpc("database_health_check").execute()
         db_status = "healthy" if response.data else "unhealthy"
     except Exception:
@@ -105,7 +103,6 @@ async def health_check():
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc):
-    """Global exception handler"""
     return JSONResponse(
         status_code=500,
         content={
@@ -117,7 +114,6 @@ async def general_exception_handler(request, exc):
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc):
-    """HTTP exception handler"""
     return JSONResponse(
         status_code=exc.status_code,
         content={"error": exc.detail}
