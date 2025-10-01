@@ -1,6 +1,17 @@
 // renderer.js
 const { ipcRenderer } = require('electron');
 
+// UI state variables
+let isExpanded = false;
+let isHovered = false;
+let idleTimer;
+
+// Drag state
+let isDragging = false;
+
+// DOM elements
+let dot, textBox, ocrResults;
+
 // Wait for DOM to load
 document.addEventListener('DOMContentLoaded', () => {
   // Get debug panel elements
@@ -10,8 +21,25 @@ document.addEventListener('DOMContentLoaded', () => {
   window.debugBackendStatus = document.getElementById('debug-backend-status');
   window.debugSuggestions = document.getElementById('debug-suggestions');
 
+  // Get UI elements
+  dot = document.getElementById('dot');
+  textBox = document.getElementById('text-box');
+  ocrResults = document.getElementById('ocr-results');
+
   // Initialize debug display
   updateDebugStatus('Waiting for app switch...');
+
+  // Initialize drag listeners
+  if (textBox) {
+    textBox.addEventListener('mousedown', onBoxMouseDown);
+  }
+
+  if (dot) {
+    dot.addEventListener('mousedown', onDotMouseDown);
+  }
+
+  document.addEventListener('mousemove', onMouseMove);
+  document.addEventListener('mouseup', onMouseUp);
 });
 
 // Listen for OCR results from main process
@@ -319,9 +347,87 @@ function toggleDebugPanel() {
 // Make function available globally
 window.showDetailedGuide = showDetailedGuide;
 
-// Initialize when DOM is loaded
-document.addEventListener('DOMContentLoaded', () => {
-  init();
+// ===== SIMPLE DRAG FUNCTIONALITY =====
 
-});
+let dragState = {
+  isDragging: false,
+  startX: 0,
+  startY: 0,
+  startBoxX: 0,
+  startBoxY: 0,
+  clickStartTime: 0,
+  clickStartPos: { x: 0, y: 0 }
+};
 
+function onBoxMouseDown(e) {
+  // Only allow dragging if not clicking on interactive elements or scrollable content
+  if (e.target.tagName === 'BUTTON' || e.target.closest('button')) return;
+  if (e.target.closest('.text-content')) return; // Allow scrolling in content area
+
+  // Ensure mouse events are not ignored during drag
+  ipcRenderer.send('set-ignore-mouse-events', false);
+
+  dragState.isDragging = true;
+  dragState.startX = e.screenX;
+  dragState.startY = e.screenY;
+  dragState.clickStartTime = Date.now();
+  dragState.clickStartPos = { x: e.screenX, y: e.screenY };
+
+  // Get the actual screen position of the window
+  dragState.startBoxX = e.screenX - e.clientX;
+  dragState.startBoxY = e.screenY - e.clientY;
+
+  e.preventDefault();
+  e.stopPropagation();
+}
+
+function onDotMouseDown(e) {
+  // Ensure mouse events are not ignored during drag
+  ipcRenderer.send('set-ignore-mouse-events', false);
+
+  dragState.isDragging = true;
+  dragState.startX = e.screenX;
+  dragState.startY = e.screenY;
+  dragState.clickStartTime = Date.now();
+  dragState.clickStartPos = { x: e.screenX, y: e.screenY };
+
+  // Get the actual screen position of the window
+  dragState.startBoxX = e.screenX - e.clientX;
+  dragState.startBoxY = e.screenY - e.clientY;
+
+  e.preventDefault();
+  e.stopPropagation();
+}
+
+function onMouseMove(e) {
+  if (!dragState.isDragging) return;
+
+  const deltaX = e.screenX - dragState.startX;
+  const deltaY = e.screenY - dragState.startY;
+
+  // Calculate new window position in screen coordinates
+  const newScreenX = dragState.startBoxX + deltaX;
+  const newScreenY = dragState.startBoxY + deltaY;
+
+  // Move the actual Electron window
+  ipcRenderer.send('move-renderer-window', newScreenX, newScreenY);
+}
+
+function onMouseUp(e) {
+  if (!dragState.isDragging) return;
+
+  // Check if it was a click (not a drag)
+  const timeDiff = Date.now() - dragState.clickStartTime;
+  const distance = Math.sqrt(
+    Math.pow(e.screenX - dragState.clickStartPos.x, 2) +
+    Math.pow(e.screenY - dragState.clickStartPos.y, 2)
+  );
+
+  dragState.isDragging = false;
+
+  // If it was a quick click with minimal movement, treat as click
+  if (timeDiff < 200 && distance < 5) {
+    // Let the click event handler deal with it
+    return;
+  }
+}

@@ -10,6 +10,7 @@ const EfficientKeystrokeCollector = require("./keystroke-collector");
 let mainWindow;
 let debugWindow;
 let suggestionsWindow;
+let settingsWindow;
 let ocrManager;
 let appTracker;
 let activityTracker;
@@ -22,6 +23,10 @@ let ocrBatchManager = null;
 
 let currentUserId = "550e8400-e29b-41d4-a716-446655440000";
 let currentSessionId = null;
+
+// Track detected apps for settings UI
+let detectedApps = new Set();
+let appPreferences = new Map(); // Cache of app preferences
 
 function sendToDebug(channel, data) {
   if (debugWindow && !debugWindow.isDestroyed()) {
@@ -516,7 +521,43 @@ function createSuggestionsWindow() {
   return suggestionsWindow;
 }
 
+function createSettingsWindow() {
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    settingsWindow.show();
+    settingsWindow.focus();
+    return settingsWindow;
+  }
 
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+
+  settingsWindow = new BrowserWindow({
+    width: 800,
+    height: 600,
+    x: Math.round((width - 800) / 2),
+    y: Math.round((height - 600) / 2),
+    frame: false,
+    transparent: false,
+    resizable: true,
+    movable: true,
+    skipTaskbar: false,
+    focusable: true,
+    fullscreenable: false,
+    alwaysOnTop: false,
+    backgroundColor: '#1a1a1a',
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+    },
+  });
+
+  settingsWindow.loadFile("settings.html");
+
+  settingsWindow.on('closed', () => {
+    settingsWindow = null;
+  });
+
+  return settingsWindow;
+}
 
 async function processAppOCR(appInfo, reason = "app_switch") {
   try {
@@ -774,6 +815,11 @@ function setupPipelines() {
         return;
       }
 
+      // Track detected app for settings UI
+      if (appInfo.appName) {
+        detectedApps.add(appInfo.appName);
+      }
+
       if (keystrokeCollector) {
         keystrokeCollector.updateContext({
           app_name: appInfo.appName,
@@ -825,8 +871,36 @@ function setupPipelines() {
 
 app.whenReady().then(async () => {
   createMainWindow();
-  createDebugWindow();
+  // createDebugWindow();  // Hidden per user request
   createSuggestionsWindow();
+
+  // Set up application menu
+  const template = [
+    {
+      label: 'Squire',
+      submenu: [
+        {
+          label: 'Settings',
+          accelerator: 'CmdOrCtrl+,',
+          click: () => {
+            createSettingsWindow();
+          }
+        },
+        { type: 'separator' },
+        { role: 'quit' }
+      ]
+    }
+  ];
+
+  const menu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(menu);
+
+  // Register global shortcut for settings
+  const { globalShortcut } = require('electron');
+  globalShortcut.register('CmdOrCtrl+Shift+S', () => {
+    console.log('⚙️ Settings shortcut triggered');
+    createSettingsWindow();
+  });
 
   await createUserSession();
   setupPipelines();
@@ -918,7 +992,7 @@ app.whenReady().then(async () => {
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createMainWindow();
-      createDebugWindow();
+      // createDebugWindow();  // Hidden per user request
       createSuggestionsWindow();
     }
   });
@@ -978,6 +1052,18 @@ ipcMain.on("suggestions-set-ignore-mouse-events", (event, ignore, options) => {
   }
 });
 
+ipcMain.on("move-suggestions-window", (event, x, y) => {
+  if (suggestionsWindow && !suggestionsWindow.isDestroyed()) {
+    suggestionsWindow.setPosition(Math.round(x), Math.round(y));
+  }
+});
+
+ipcMain.on("move-renderer-window", (event, x, y) => {
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.setPosition(Math.round(x), Math.round(y));
+  }
+});
+
 ipcMain.on("overlay-clicked", (event, overlayType) => {
   console.log(`🖱️ User clicked ${overlayType} overlay - focusing main window`);
 
@@ -987,5 +1073,68 @@ ipcMain.on("overlay-clicked", (event, overlayType) => {
   }
 
   skipNextOCR = true;
+});
+
+// Settings window IPC handlers
+ipcMain.on("close-settings", () => {
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    settingsWindow.close();
+  }
+});
+
+ipcMain.on("get-detected-apps", (event) => {
+  event.reply("detected-apps", Array.from(detectedApps));
+});
+
+ipcMain.on("load-app-preferences", async (event) => {
+  try {
+    const response = await fetch(`http://127.0.0.1:8000/api/vision/preferences/${currentUserId}`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (response.ok) {
+      const prefs = await response.json();
+      event.reply("app-preferences-loaded", prefs);
+    } else {
+      console.error("Failed to load app preferences:", response.status);
+      event.reply("app-preferences-loaded", []);
+    }
+  } catch (error) {
+    console.error("Error loading app preferences:", error);
+    event.reply("app-preferences-loaded", []);
+  }
+});
+
+ipcMain.on("update-app-preference", async (event, { appName, updates }) => {
+  try {
+    const response = await fetch(`http://127.0.0.1:8000/api/vision/preferences/${currentUserId}/${appName}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(updates),
+    });
+
+    if (response.ok) {
+      console.log(`✅ Updated preference for ${appName}:`, updates);
+
+      // Update local cache
+      appPreferences.set(appName, { ...appPreferences.get(appName), ...updates });
+
+      event.reply("preference-updated", { appName, updates });
+    } else {
+      console.error(`Failed to update preference for ${appName}:`, response.status);
+    }
+  } catch (error) {
+    console.error(`Error updating preference for ${appName}:`, error);
+  }
+});
+
+ipcMain.on("toggle-global-vision", (event, enabled) => {
+  console.log(`🔄 Global vision feature ${enabled ? 'enabled' : 'disabled'}`);
+  // This will be used by VisionScheduler later
 });
 
