@@ -1,4 +1,4 @@
-const { app, BrowserWindow, screen, ipcMain, Menu, dialog } = require("electron");
+const { app, BrowserWindow, screen, ipcMain, Menu, dialog, systemPreferences } = require("electron");
 const path = require("path");
 
 const OCRManager = require("./ocr-manager");
@@ -373,6 +373,8 @@ function createDebugWindow() {
     skipTaskbar: true,
     focusable: false,
     fullscreenable: false,
+    alwaysOnTop: true,
+    type: 'panel',  // 🚀 Try panel type for better workspace behavior
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
@@ -381,14 +383,58 @@ function createDebugWindow() {
 
   debugWindow.loadFile("debug.html");
 
-  // 🚀 Make it stick across spaces
-  debugWindow.on("ready-to-show", () => {
-    debugWindow.setAlwaysOnTop(true, "floating"); // try "modal-panel" if still flaky
+  // 🚀 Enhanced: Aggressive workspace persistence for macOS
+  debugWindow.once("ready-to-show", () => {
+    debugWindow.show();
+
+    // WORKAROUND: Electron bug requires window to be focused once for settings to stick
+    debugWindow.setFocusable(true);
+    debugWindow.focus();
+
+    // Apply settings while focused
+    debugWindow.setAlwaysOnTop(true, "screen-saver");
     debugWindow.setVisibleOnAllWorkspaces(true, {
       visibleOnFullScreen: true,
       skipTransformProcessType: true,
     });
+
+    // Restore non-focusable behavior after settings are applied
+    setTimeout(() => {
+      debugWindow.setFocusable(false);
+      debugWindow.blur();
+
+      // Re-apply settings with screen-saver level
+      debugWindow.setAlwaysOnTop(true, "screen-saver");
+      debugWindow.setVisibleOnAllWorkspaces(true, {
+        visibleOnFullScreen: true,
+        skipTransformProcessType: true,
+      });
+      console.log("✅ Debug window configured for all workspaces (with focus workaround)");
+    }, 300);
   });
+
+  // Constantly re-enforce on various events
+  const enforceVisibility = () => {
+    if (debugWindow && !debugWindow.isDestroyed()) {
+      debugWindow.setAlwaysOnTop(true, "screen-saver");
+      debugWindow.setVisibleOnAllWorkspaces(true, {
+        visibleOnFullScreen: true,
+        skipTransformProcessType: true,
+      });
+    }
+  };
+
+  debugWindow.on("show", enforceVisibility);
+  debugWindow.on("blur", enforceVisibility);
+  debugWindow.on("focus", enforceVisibility);
+  debugWindow.on("move", enforceVisibility);
+
+  // Periodic re-enforcement (every 2 seconds)
+  setInterval(() => {
+    if (debugWindow && !debugWindow.isDestroyed() && debugWindow.isVisible()) {
+      enforceVisibility();
+    }
+  }, 2000);
 
   return debugWindow;
 }
@@ -408,6 +454,8 @@ function createSuggestionsWindow() {
     skipTaskbar: true,
     focusable: false,
     fullscreenable: false,
+    alwaysOnTop: true,
+    type: 'panel',  // 🚀 Try panel type for better workspace behavior
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
@@ -416,14 +464,59 @@ function createSuggestionsWindow() {
 
   suggestionsWindow.loadFile("suggestions.html");
 
-  // 🚀 Make it stick across spaces
-  suggestionsWindow.on("ready-to-show", () => {
-    suggestionsWindow.setAlwaysOnTop(true, "floating");
+  // 🚀 Enhanced: Aggressive workspace persistence for macOS
+  suggestionsWindow.once("ready-to-show", () => {
+    suggestionsWindow.show();
+
+    // WORKAROUND: Electron bug requires window to be focused once for settings to stick
+    // Temporarily make focusable, focus, then make non-focusable again
+    suggestionsWindow.setFocusable(true);
+    suggestionsWindow.focus();
+
+    // Apply settings while focused
+    suggestionsWindow.setAlwaysOnTop(true, "screen-saver");
     suggestionsWindow.setVisibleOnAllWorkspaces(true, {
       visibleOnFullScreen: true,
       skipTransformProcessType: true,
     });
+
+    // Restore non-focusable behavior after settings are applied
+    setTimeout(() => {
+      suggestionsWindow.setFocusable(false);
+      suggestionsWindow.blur();
+
+      // Re-apply settings with screen-saver level
+      suggestionsWindow.setAlwaysOnTop(true, "screen-saver");
+      suggestionsWindow.setVisibleOnAllWorkspaces(true, {
+        visibleOnFullScreen: true,
+        skipTransformProcessType: true,
+      });
+      console.log("✅ Suggestions window configured for all workspaces (with focus workaround)");
+    }, 300);
   });
+
+  // Constantly re-enforce on various events
+  const enforceVisibility = () => {
+    if (suggestionsWindow && !suggestionsWindow.isDestroyed()) {
+      suggestionsWindow.setAlwaysOnTop(true, "screen-saver");
+      suggestionsWindow.setVisibleOnAllWorkspaces(true, {
+        visibleOnFullScreen: true,
+        skipTransformProcessType: true,
+      });
+    }
+  };
+
+  suggestionsWindow.on("show", enforceVisibility);
+  suggestionsWindow.on("blur", enforceVisibility);
+  suggestionsWindow.on("focus", enforceVisibility);
+  suggestionsWindow.on("move", enforceVisibility);
+
+  // Periodic re-enforcement (every 2 seconds)
+  setInterval(() => {
+    if (suggestionsWindow && !suggestionsWindow.isDestroyed() && suggestionsWindow.isVisible()) {
+      enforceVisibility();
+    }
+  }, 2000);
 
   return suggestionsWindow;
 }
@@ -742,6 +835,90 @@ app.whenReady().then(async () => {
 
   await createUserSession();
   setupPipelines();
+
+  // 🚀 THE FIX: Listen for macOS Space changes and re-apply window settings
+  // This is the most important fix for workspace persistence
+  if (process.platform === "darwin") {
+    console.log("🍎 Running on macOS - setting up Space change listener");
+
+    // Log initial state
+    setTimeout(() => {
+      if (debugWindow && !debugWindow.isDestroyed()) {
+        console.log("📊 Debug window initial state:", {
+          isVisible: debugWindow.isVisible(),
+          isAlwaysOnTop: debugWindow.isAlwaysOnTop(),
+          bounds: debugWindow.getBounds()
+        });
+      }
+      if (suggestionsWindow && !suggestionsWindow.isDestroyed()) {
+        console.log("📊 Suggestions window initial state:", {
+          isVisible: suggestionsWindow.isVisible(),
+          isAlwaysOnTop: suggestionsWindow.isAlwaysOnTop(),
+          bounds: suggestionsWindow.getBounds()
+        });
+      }
+    }, 1000);
+
+    systemPreferences.subscribeNotification(
+      "NSWorkspaceActiveSpaceDidChangeNotification",
+      () => {
+        console.log("🔄 SPACE CHANGE DETECTED!");
+
+        // Re-apply settings for debug window
+        if (debugWindow && !debugWindow.isDestroyed()) {
+          console.log("  → Re-applying debug window settings");
+          debugWindow.setAlwaysOnTop(true, "screen-saver");
+          debugWindow.setVisibleOnAllWorkspaces(true, {
+            visibleOnFullScreen: true,
+            skipTransformProcessType: true,
+          });
+          debugWindow.show();  // Force show
+        }
+
+        // Re-apply settings for suggestions window
+        if (suggestionsWindow && !suggestionsWindow.isDestroyed()) {
+          console.log("  → Re-applying suggestions window settings");
+          suggestionsWindow.setAlwaysOnTop(true, "screen-saver");
+          suggestionsWindow.setVisibleOnAllWorkspaces(true, {
+            visibleOnFullScreen: true,
+            skipTransformProcessType: true,
+          });
+          suggestionsWindow.show();  // Force show
+        }
+
+        console.log("✅ Re-applied workspace persistence after Space change");
+      }
+    );
+    console.log("✅ Subscribed to macOS Space change notifications");
+  }
+
+  // 🚀 Enforce overlay windows persistence across ALL workspace events
+  // This catches cases where macOS tries to reset window levels
+  app.on("browser-window-created", (event, window) => {
+    // Re-enforce settings for suggestions window
+    if (suggestionsWindow && !suggestionsWindow.isDestroyed() && window === suggestionsWindow) {
+      setTimeout(() => {
+        suggestionsWindow.setAlwaysOnTop(true, "screen-saver");
+        suggestionsWindow.setVisibleOnAllWorkspaces(true, {
+          visibleOnFullScreen: true,
+          skipTransformProcessType: true,
+        });
+        console.log("🔄 Re-enforced suggestions window workspace visibility");
+      }, 100);
+    }
+
+    // Re-enforce settings for debug window
+    if (debugWindow && !debugWindow.isDestroyed() && window === debugWindow) {
+      setTimeout(() => {
+        debugWindow.setAlwaysOnTop(true, "screen-saver");
+        debugWindow.setVisibleOnAllWorkspaces(true, {
+          visibleOnFullScreen: true,
+          skipTransformProcessType: true,
+        });
+        console.log("🔄 Re-enforced debug window workspace visibility");
+      }, 100);
+    }
+  });
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
