@@ -4,9 +4,11 @@
   "description": "OCR overlay app with app focus monitoring",
   "main": "main.js",
   "scripts": {
-    "start": "electron .",
-    "dev": "electron . --enable-logging",
+    "start": "npm run build:css && electron .",
+    "dev": "npm run build:css && electron . --enable-logging",
     "build": "electron-builder",
+    "build:css": "tailwindcss -i ./src-styles.css -o ./styles.css --minify",
+    "build:css:watch": "tailwindcss -i ./src-styles.css -o ./styles.css --watch",
     "build-and-run": "npm run build && open dist/mac-arm64/Squire.app",
     "dist": "electron-builder --publish=never"
   },
@@ -19,11 +21,14 @@
   "license": "MIT",
   "devDependencies": {
     "@eslint/js": "^9.36.0",
+    "autoprefixer": "^10.4.21",
     "electron": "^27.0.0",
     "electron-builder": "^24.6.4",
     "eslint": "^9.36.0",
     "eslint-plugin-react": "^7.37.5",
-    "globals": "^16.4.0"
+    "globals": "^16.4.0",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.17"
   },
   "dependencies": {
     "@paymoapp/active-window": "^2.1.2",

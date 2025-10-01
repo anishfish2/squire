@@ -187,25 +187,20 @@ class OCRBatchManager {
     const allCompleted = this.pendingBatch.every(item => item.ocrCompleted);
     const batchFull = this.pendingBatch.length >= this.maxBatchSize;
 
+    // Trigger 1: All OCR jobs completed
     if (allCompleted) {
       console.log(`📦 Batch ready: all OCR completed (${this.pendingBatch.length}/${this.maxBatchSize})`);
       this.processBatch();
       return;
     }
 
+    // Log status if batch is full but not all completed
     if (batchFull) {
       const completedCount = this.pendingBatch.filter(item => item.ocrCompleted).length;
-      const completionRate = completedCount / this.pendingBatch.length;
-
-      if (completionRate >= 0.5) {
-        console.log(`📦 Batch ready: batch full with ${completionRate * 100}% OCR completed (${completedCount}/${this.pendingBatch.length})`);
-        this.processBatch();
-        return;
-      } else {
-        console.log(`⏳ Batch full but waiting for more OCR: ${completedCount}/${this.pendingBatch.length} completed`);
-      }
+      console.log(`⏳ Batch full but waiting for all OCR: ${completedCount}/${this.pendingBatch.length} completed`);
     }
 
+    // Trigger 2: Timeout - process if at least 1 job completed
     if (!this.batchTimeout) {
       this.batchTimeout = setTimeout(() => {
         const completedCount = this.pendingBatch.filter(item => item.ocrCompleted).length;

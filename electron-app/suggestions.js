@@ -62,42 +62,42 @@ function updateOCRText(textLines, aiSuggestions = [], appName = '') {
   if (aiSuggestions && aiSuggestions.length > 0) {
     aiSuggestions.forEach((suggestion, index) => {
       const suggestionDiv = document.createElement('div');
-      suggestionDiv.className = 'suggestion-card';
+      suggestionDiv.className = 'bg-white/[0.06] text-white p-4 mb-3 rounded-xl font-sans border border-white/10 shadow-[0_4px_12px_rgba(0,0,0,0.2),inset_0_1px_1px_rgba(255,255,255,0.08)] backdrop-blur-xl max-w-[380px] transition-all duration-200 ease-out hover:bg-white/[0.09] hover:border-white/15 hover:-translate-y-px hover:shadow-[0_6px_20px_rgba(0,0,0,0.3),inset_0_1px_1px_rgba(255,255,255,0.12)]';
       suggestionDiv.onclick = () => {
         console.log('Clicked suggestion:', suggestion.title);
       };
 
       const needsGuide = suggestion.content.requires_detailed_guide;
       const guideButton = needsGuide
-        ? `<button class="guide-button" onclick="showDetailedGuide(this, ${JSON.stringify(
+        ? `<button class="mt-2.5 px-3 py-1.5 text-xs bg-white/10 text-white/90 border border-white/20 rounded-lg cursor-pointer hover:bg-white/15 hover:border-white/30 font-medium shadow-sm transition-all hover:shadow-md" onclick="showDetailedGuide(this, ${JSON.stringify(
             suggestion
           ).replace(/"/g, '&quot;')})">📋 Step-by-step guide</button>`
         : '';
 
-      // Build expanded suggestion UI
+      // Build expanded suggestion UI with Tailwind classes
       suggestionDiv.innerHTML = `
-        <h3 class="suggestion-title">${suggestion.title}</h3>
-        <p class="suggestion-description">${suggestion.content.description}</p>
+        <h3 class="m-0 mb-1.5 text-base font-semibold text-white/95">${suggestion.title}</h3>
+        <p class="text-sm mb-2.5 text-white/75 leading-snug">${suggestion.content.description}</p>
 
-        <div class="suggestion-meta">
-          <p><strong>Expected Benefit:</strong> ${suggestion.content.expected_benefit || '—'}</p>
-          <p><strong>Difficulty:</strong> ${suggestion.content.difficulty || '—'}</p>
-          <p><strong>Time Investment:</strong> ${suggestion.content.time_investment || '—'}</p>
-          <p><strong>Platforms:</strong> ${(suggestion.content.platforms || []).join(', ') || '—'}</p>
-          <p><strong>Tools Needed:</strong> ${(suggestion.content.tools_needed || []).join(', ') || '—'}</p>
+        <div class="text-xs space-y-0.5 text-white/70 mb-2.5">
+          <div class="flex gap-1.5"><span class="text-white/50 min-w-[90px]">Benefit:</span><span class="text-white/80">${suggestion.content.expected_benefit || '—'}</span></div>
+          <div class="flex gap-1.5"><span class="text-white/50 min-w-[90px]">Difficulty:</span><span class="text-white/80">${suggestion.content.difficulty || '—'}</span></div>
+          <div class="flex gap-1.5"><span class="text-white/50 min-w-[90px]">Time:</span><span class="text-white/80">${suggestion.content.time_investment || '—'}</span></div>
+          <div class="flex gap-1.5"><span class="text-white/50 min-w-[90px]">Platforms:</span><span class="text-white/80">${(suggestion.content.platforms || []).join(', ') || '—'}</span></div>
+          <div class="flex gap-1.5"><span class="text-white/50 min-w-[90px]">Tools:</span><span class="text-white/80">${(suggestion.content.tools_needed || []).join(', ') || '—'}</span></div>
         </div>
 
-        <div class="suggestion-steps">
-          <strong>Action Steps:</strong>
-          <ul>
+        <div class="text-xs">
+          <div class="font-medium text-white/90 mb-1">Action Steps:</div>
+          <ul class="ml-4 space-y-0.5 text-white/75">
             ${(suggestion.content.action_steps || [])
-              .map(step => `<li>${step}</li>`)
+              .map(step => `<li class="leading-snug">${step}</li>`)
               .join('')}
           </ul>
         </div>
 
         ${guideButton}
-        <div class="detailed-guide hidden" id="guide-${index}"></div>
+        <div class="hidden mt-2.5 p-2.5 bg-white/5 rounded-lg border-l-2 border-l-white/20 max-h-[300px] overflow-y-auto" id="guide-${index}"></div>
       `;
       ocrResults.appendChild(suggestionDiv);
     });

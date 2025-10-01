@@ -6,41 +6,41 @@
   <title>Squire Overlay</title>
   <link rel="stylesheet" href="styles.css">
 </head>
-<body>
-  <div id="overlay-container">
+<body class="m-0 p-0 bg-transparent font-sans overflow-hidden select-none">
+  <div id="overlay-container" class="w-screen h-screen relative flex items-start justify-end p-0 box-border pointer-events-none">
     <!-- Debug panel (top-left corner) -->
-    <div id="debug-panel" class="debug-panel">
-      <div class="debug-header">Squire Debug</div>
-      <div class="debug-item">
-        <span class="debug-label">Current App:</span>
-        <span id="debug-app" class="debug-value">-</span>
+    <div id="debug-panel" class="debug-panel fixed top-5 left-5 bg-gray-900/95 text-white p-5 rounded-xl text-sm font-mono min-w-[280px] pointer-events-auto z-[9999] border-2 border-white/30 backdrop-blur-xl shadow-[0_12px_40px_rgba(0,0,0,0.8)] [-webkit-app-region:drag]">
+      <div class="debug-header font-bold text-base mb-3 text-emerald-400 border-b-2 border-white/30 pb-2 cursor-move [-webkit-app-region:drag]">Squire Debug</div>
+      <div class="debug-item mb-1.5 flex justify-between items-center [-webkit-app-region:no-drag]">
+        <span class="debug-label text-[#aaa] font-medium min-w-[100px]">Current App:</span>
+        <span id="debug-app" class="debug-value text-white font-semibold text-right max-w-[140px] overflow-hidden text-ellipsis whitespace-nowrap">-</span>
       </div>
-      <div class="debug-item">
-        <span class="debug-label">Window:</span>
-        <span id="debug-window" class="debug-value">-</span>
+      <div class="debug-item mb-1.5 flex justify-between items-center [-webkit-app-region:no-drag]">
+        <span class="debug-label text-[#aaa] font-medium min-w-[100px]">Window:</span>
+        <span id="debug-window" class="debug-value text-white font-semibold text-right max-w-[140px] overflow-hidden text-ellipsis whitespace-nowrap">-</span>
       </div>
-      <div class="debug-item">
-        <span class="debug-label">OCR Lines:</span>
-        <span id="debug-ocr-lines" class="debug-value">-</span>
+      <div class="debug-item mb-1.5 flex justify-between items-center [-webkit-app-region:no-drag]">
+        <span class="debug-label text-[#aaa] font-medium min-w-[100px]">OCR Lines:</span>
+        <span id="debug-ocr-lines" class="debug-value text-white font-semibold text-right max-w-[140px] overflow-hidden text-ellipsis whitespace-nowrap">-</span>
       </div>
-      <div class="debug-item">
-        <span class="debug-label">Backend Call:</span>
-        <span id="debug-backend-status" class="debug-value">-</span>
+      <div class="debug-item mb-1.5 flex justify-between items-center [-webkit-app-region:no-drag]">
+        <span class="debug-label text-[#aaa] font-medium min-w-[100px]">Backend Call:</span>
+        <span id="debug-backend-status" class="debug-value text-white font-semibold text-right max-w-[140px] overflow-hidden text-ellipsis whitespace-nowrap">-</span>
       </div>
-      <div class="debug-item">
-        <span class="debug-label">Suggestions:</span>
-        <span id="debug-suggestions" class="debug-value">-</span>
+      <div class="debug-item mb-1.5 flex justify-between items-center [-webkit-app-region:no-drag]">
+        <span class="debug-label text-[#aaa] font-medium min-w-[100px]">Suggestions:</span>
+        <span id="debug-suggestions" class="debug-value text-white font-semibold text-right max-w-[140px] overflow-hidden text-ellipsis whitespace-nowrap">-</span>
       </div>
     </div>
 
-    <!-- Collapsed state: black dot -->
-    <div id="dot" class="dot">
+    <!-- Collapsed state: sleek dot -->
+    <div id="dot" class="dot w-14 h-14 bg-gradient-to-b from-white/10 to-white/5 rounded-full shadow-[0_4px_16px_rgba(0,0,0,0.3),inset_0_1px_1px_rgba(255,255,255,0.3)] backdrop-blur-2xl border border-white/20 cursor-pointer transition-all duration-300 ease-out absolute top-5 right-[26px] z-10 pointer-events-auto [-webkit-app-region:no-drag] flex items-center justify-center hover:scale-105 hover:shadow-[0_6px_20px_rgba(0,0,0,0.4),inset_0_1px_2px_rgba(255,255,255,0.4)] hover:border-white/30 hover:bg-gradient-to-b hover:from-white/15 hover:to-white/8">
     </div>
 
     <!-- Expanded state: text box (initially hidden) -->
-    <div id="text-box" class="text-box hidden">
-      <div class="text-content">
-        <div id="ocr-results">
+    <div id="text-box" class="text-box w-[380px] min-h-[100px] max-h-[520px] bg-white/[0.08] rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.5),inset_0_1px_1px_rgba(255,255,255,0.15)] backdrop-blur-3xl border border-white/20 absolute top-5 right-[15px] overflow-hidden transition-all duration-[400ms] ease-out z-[5] pointer-events-auto [-webkit-app-region:drag] opacity-0 scale-[0.92] hidden">
+      <div class="text-content p-4 max-h-[480px] h-auto overflow-y-auto overflow-x-hidden custom-scrollbar [-webkit-app-region:no-drag]">
+        <div id="ocr-results" class="text-white text-sm leading-relaxed break-words whitespace-pre-wrap text-left font-normal">
           <!-- OCR text will be populated here -->
         </div>
       </div>
