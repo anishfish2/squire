@@ -278,12 +278,13 @@ def detect_error_state(ocr_lines: List[str]) -> Dict[str, Any]:
 
 async def analyze_current_context(ocr_lines: List[str],
                                 app_context: str = "",
-                                recent_activities: List[str] = None) -> ContextAnalysisResult:
+                                recent_activities: List[str] = []) -> ContextAnalysisResult:
     """Use LLM to understand what the user is currently doing"""
 
+    print("Analyzing current context")
     client = get_openai_client()
     if not ocr_lines or not client:
-        return ContextAnalysisResult([], [], "unknown", "work", "general", 0.0)
+        return ContextAnalysisResult()
 
     content = '\n'.join(ocr_lines)
 
@@ -794,6 +795,7 @@ async def build_batch_openai_prompt(request: BatchContextRequest, user_history: 
 
         # Only analyze if we have meaningful context
         if latest_app.meaningful_context:
+            print("There is meaningful context")
             try:
                 # Use meaningful context (not raw OCR)
                 context_for_analysis = [latest_app.meaningful_context]

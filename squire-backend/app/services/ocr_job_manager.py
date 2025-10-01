@@ -218,6 +218,9 @@ class OCRJobManager:
             await self._emit_job_completion_websocket(job, text_lines, extracted_entities, meaningful_context)
             print(f"📡 OCR results sent via websocket")
 
+            # Update job dict with completion data for post-processing
+            job.update(completion_data)
+
             await self._post_process_job(job, text_lines, extracted_entities, session_context_data)
 
             self._cleanup_image_data(job_id)
@@ -304,10 +307,10 @@ class OCRJobManager:
 
             await self._update_knowledge_graph(job, extracted_entities)
 
-            await self._generate_suggestions(job, text_lines, extracted_entities)
-
         except Exception as e:
-            pass
+            print(f"❌ Error in _post_process_job: {e}")
+            import traceback
+            traceback.print_exc()
 
     async def _update_app_session(self, job: Dict, session_context_data: Dict):
         try:
@@ -420,7 +423,8 @@ Only include insights with confidence > 0.6. Return empty arrays if no clear ins
                     model="gpt-4o-mini",
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.3,
-                    max_tokens=500
+                    max_tokens=500,
+                    response_format={"type": "json_object"}
                 )
 
                 result_text = response.choices[0].message.content.strip()
@@ -434,6 +438,7 @@ Only include insights with confidence > 0.6. Return empty arrays if no clear ins
 
                 insights = json.loads(result_text)
                 print(f"✅ Knowledge graph insights extracted from OCR")
+                print(f"📊 Insights: {json.dumps(insights, indent=2)}")
 
                 node_type_mapping = {
                     "habits": "habit",
@@ -444,8 +449,11 @@ Only include insights with confidence > 0.6. Return empty arrays if no clear ins
                     "patterns": "pattern"
                 }
 
+                created_nodes = []  # Track created nodes for relationship building
+
                 for category, node_type in node_type_mapping.items():
                     items = insights.get(category, [])
+                    print(f"🔍 Processing {category}: {len(items)} items")
                     for item in items[:2]:
                         try:
                             confidence = item.get("confidence", 0.7)
@@ -467,13 +475,14 @@ Only include insights with confidence > 0.6. Return empty arrays if no clear ins
                             if "timeframe" in item:
                                 content_data["timeframe"] = item["timeframe"]
 
-                            supabase.rpc(
+                            result = supabase.rpc(
                                 "upsert_knowledge_node",
                                 {
                                     "p_user_id": user_id,
                                     "p_node_type": node_type,
                                     "p_content": content_data,
                                     "p_weight": confidence,
+                                    "p_source_event_ids": [],
                                     "p_metadata": {
                                         "confidence": confidence,
                                         "extracted_at": job.get("created_at"),
@@ -482,14 +491,85 @@ Only include insights with confidence > 0.6. Return empty arrays if no clear ins
                                 }
                             ).execute()
 
+                            node_id = result.data
+                            created_nodes.append({
+                                "id": node_id,
+                                "type": node_type,
+                                "description": content_data["description"]
+                            })
+
+                            print(f"✅ Created {node_type} node: {content_data['description'][:50]}...")
+
                         except Exception as e:
-                            pass
+                            print(f"❌ Failed to create {node_type} node: {e}")
+                            import traceback
+                            traceback.print_exc()
+
+                # Create relationships between nodes
+                if len(created_nodes) >= 2:
+                    self._create_node_relationships(user_id, created_nodes)
 
             except Exception as e:
-                pass
+                print(f"❌ Failed to parse knowledge insights: {e}")
+                print(f"   Raw response: {result_text[:200]}")
+                import traceback
+                traceback.print_exc()
 
         except Exception as e:
-            pass
+            print(f"❌ Knowledge graph update failed: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _create_node_relationships(self, user_id: str, nodes: List[Dict]):
+        """Create relationships between knowledge nodes based on their types"""
+        try:
+            from app.core.database import supabase
+
+            # Define relationship rules: (source_type, target_type, relationship_type)
+            relationship_rules = [
+                ("skill", "tool", "uses"),
+                ("goal", "skill", "requires"),
+                ("workflow", "tool", "uses"),
+                ("habit", "workflow", "follows"),
+                ("pattern", "skill", "demonstrates"),
+            ]
+
+            for i, node1 in enumerate(nodes):
+                for node2 in nodes[i+1:]:
+                    # Check if there's a rule for this pair
+                    relationship_type = None
+                    for source_type, target_type, rel_type in relationship_rules:
+                        if node1["type"] == source_type and node2["type"] == target_type:
+                            relationship_type = rel_type
+                            break
+                        elif node2["type"] == source_type and node1["type"] == target_type:
+                            relationship_type = rel_type
+                            node1, node2 = node2, node1  # Swap to match rule direction
+                            break
+
+                    if relationship_type:
+                        try:
+                            supabase.table("knowledge_relationships").insert({
+                                "user_id": user_id,
+                                "source_node_id": node1["id"],
+                                "target_node_id": node2["id"],
+                                "relationship_type": relationship_type,
+                                "strength": 0.7,
+                                "metadata": {
+                                    "auto_created": True,
+                                    "source_desc": node1["description"][:50],
+                                    "target_desc": node2["description"][:50]
+                                }
+                            }).execute()
+
+                            print(f"✅ Created relationship: {node1['type']} -{relationship_type}-> {node2['type']}")
+
+                        except Exception as e:
+                            # Might fail if relationship already exists, that's okay
+                            pass
+
+        except Exception as e:
+            print(f"❌ Failed to create relationships: {e}")
 
     async def _emit_job_completion_websocket(self, job: Dict, text_lines: List[str], extracted_entities: List[Dict], meaningful_context: str = ""):
         try:

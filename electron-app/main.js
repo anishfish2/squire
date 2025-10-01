@@ -339,6 +339,7 @@ function createMainWindow() {
   return mainWindow;
 }
 
+
 function createDebugWindow() {
   debugWindow = new BrowserWindow({
     width: 300,
@@ -362,39 +363,17 @@ function createDebugWindow() {
 
   debugWindow.loadFile("debug.html");
 
+  // 🚀 Force overlay behavior
   debugWindow.setAlwaysOnTop(true, "screen-saver");
   debugWindow.setVisibleOnAllWorkspaces(true, {
     visibleOnFullScreen: true,
-    skipTransformProcessType: true
+    skipTransformProcessType: true,
   });
-
-  debugWindow.setIgnoreMouseEvents(true, { forward: true });
-
-  debugWindow.webContents.on("before-input-event", (event, input) => {
-    if (input.type === "mouseMove") {
-      debugWindow.setIgnoreMouseEvents(false);
-    }
-  });
-  debugWindow.on("blur", () => {
-    if (debugWindow) debugWindow.setIgnoreMouseEvents(true, { forward: true });
-  });
-
-  debugWindow.on("closed", () => {
-    debugWindow = null;
-  });
-
-  debugWindow.webContents.on('did-finish-load', () => {
-    debugWindow.webContents.executeJavaScript(`
-      document.addEventListener('click', () => {
-        require('electron').ipcRenderer.send('overlay-clicked', 'debug');
-      });
-    `);
-  });
-
-
+  debugWindow.setFullScreenable(false);
 
   return debugWindow;
 }
+
 
 function createSuggestionsWindow() {
   const { width } = screen.getPrimaryDisplay().workAreaSize;
@@ -421,40 +400,17 @@ function createSuggestionsWindow() {
 
   suggestionsWindow.loadFile("suggestions.html");
 
+  // 🚀 Force overlay behavior
   suggestionsWindow.setAlwaysOnTop(true, "screen-saver");
   suggestionsWindow.setVisibleOnAllWorkspaces(true, {
     visibleOnFullScreen: true,
-    skipTransformProcessType: true
+    skipTransformProcessType: true,
   });
-  suggestionsWindow.setIgnoreMouseEvents(true, { forward: true });
-
-  suggestionsWindow.webContents.on("before-input-event", (event, input) => {
-    if (input.type === "mouseMove") {
-      suggestionsWindow.setIgnoreMouseEvents(false);
-    }
-  });
-  suggestionsWindow.on("blur", () => {
-    if (suggestionsWindow) suggestionsWindow.setIgnoreMouseEvents(true, { forward: true });
-  });
-
-  suggestionsWindow.on("closed", () => {
-    suggestionsWindow = null;
-  });
-
-  suggestionsWindow.webContents.on('did-finish-load', () => {
-    suggestionsWindow.webContents.executeJavaScript(`
-      document.addEventListener('click', () => {
-        require('electron').ipcRenderer.send('overlay-clicked', 'suggestions');
-      });
-    `);
-  });
-
-
-
-
+  suggestionsWindow.setFullScreenable(false);
 
   return suggestionsWindow;
 }
+
 
 async function processAppOCR(appInfo, reason = "app_switch") {
   try {
@@ -782,6 +738,17 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
   }
+});
+
+app.on("browser-window-created", (_, win) => {
+  win.on("show", () => {
+    win.setVisibleOnAllWorkspaces(true, {
+      visibleOnFullScreen: true,
+      skipTransformProcessType: true,
+    });
+    win.setAlwaysOnTop(true, "screen-saver");
+    win.setFullScreenable(false);
+  });
 });
 
 app.on("before-quit", () => {
