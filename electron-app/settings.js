@@ -159,15 +159,15 @@ function createAppCard(pref) {
   const isRecentlyActive = detectedApps.has(pref.app_name);
 
   return `
-    <div class="app-card bg-white/5 hover:bg-white/10 rounded-xl p-4 border border-white/10 hover:border-white/20 transition-all" data-app-name="${pref.app_name}">
-      <div class="flex items-center justify-between mb-3">
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-lg flex items-center justify-center text-lg">
+    <div class="app-card bg-white/[0.06] hover:bg-white/[0.09] rounded-xl p-3 border border-white/10 transition-all" data-app-name="${pref.app_name}">
+      <div class="flex items-center justify-between mb-2.5">
+        <div class="flex items-center gap-2">
+          <div class="w-7 h-7 bg-white/10 rounded-lg flex items-center justify-center text-sm border border-white/20">
             📱
           </div>
           <div>
-            <h3 class="text-white font-semibold text-sm m-0">${pref.app_name}</h3>
-            ${isRecentlyActive ? '<span class="text-green-400 text-xs">● Active</span>' : '<span class="text-white/40 text-xs">○ Inactive</span>'}
+            <h3 class="text-white font-medium text-sm m-0">${pref.app_name}</h3>
+            ${isRecentlyActive ? '<span class="text-white/50 text-xs">● Active</span>' : '<span class="text-white/30 text-xs">○</span>'}
           </div>
         </div>
       </div>
@@ -175,38 +175,38 @@ function createAppCard(pref) {
       <div class="space-y-2">
         <!-- OCR Toggle -->
         <div class="flex items-center justify-between">
-          <span class="text-white/70 text-sm">OCR</span>
-          <label class="relative inline-block w-12 h-6 cursor-pointer">
+          <span class="text-white/70 text-xs">OCR</span>
+          <label class="relative inline-block w-11 h-6 cursor-pointer">
             <input type="checkbox" id="ocr-toggle-${pref.app_name}" ${pref.allow_ocr ? 'checked' : ''} class="sr-only peer">
-            <div class="w-full h-full bg-white/10 peer-checked:bg-green-500/50 rounded-full transition-all"></div>
-            <div class="absolute left-1 top-1 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-6 shadow-lg"></div>
+            <div class="w-full h-full bg-white/10 peer-checked:bg-white/20 rounded-full transition-all border border-white/20"></div>
+            <div class="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
           </label>
         </div>
 
         <!-- Vision Toggle -->
         <div class="flex items-center justify-between">
-          <span class="text-white/70 text-sm">Vision Analysis</span>
-          <label class="relative inline-block w-12 h-6 cursor-pointer">
+          <span class="text-white/70 text-xs">Vision</span>
+          <label class="relative inline-block w-11 h-6 cursor-pointer">
             <input type="checkbox" id="vision-toggle-${pref.app_name}" ${pref.allow_vision ? 'checked' : ''} class="sr-only peer">
-            <div class="w-full h-full bg-white/10 peer-checked:bg-purple-500/50 rounded-full transition-all"></div>
-            <div class="absolute left-1 top-1 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-6 shadow-lg"></div>
+            <div class="w-full h-full bg-white/10 peer-checked:bg-white/20 rounded-full transition-all border border-white/20"></div>
+            <div class="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
           </label>
         </div>
 
         <!-- Screenshot Storage Toggle -->
         <div class="flex items-center justify-between">
-          <span class="text-white/70 text-sm">Store Screenshots</span>
-          <label class="relative inline-block w-12 h-6 cursor-pointer">
+          <span class="text-white/70 text-xs">Screenshots</span>
+          <label class="relative inline-block w-11 h-6 cursor-pointer">
             <input type="checkbox" id="screenshot-toggle-${pref.app_name}" ${pref.allow_screenshots ? 'checked' : ''} class="sr-only peer">
-            <div class="w-full h-full bg-white/10 peer-checked:bg-blue-500/50 rounded-full transition-all"></div>
-            <div class="absolute left-1 top-1 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-6 shadow-lg"></div>
+            <div class="w-full h-full bg-white/10 peer-checked:bg-white/20 rounded-full transition-all border border-white/20"></div>
+            <div class="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
           </label>
         </div>
       </div>
 
       ${pref.allow_vision ? `
-        <div class="mt-3 pt-3 border-t border-white/10 text-xs text-white/50">
-          💰 Vision API costs: ~$0.01-0.03/image
+        <div class="mt-2 pt-2 border-t border-white/10 text-xs text-white/40">
+          Vision costs: ~$0.01-0.03/image
         </div>
       ` : ''}
     </div>

@@ -53,6 +53,8 @@
       "debug.js",
       "suggestions.html",
       "suggestions.js",
+      "settings.html",
+      "settings.js",
       "styles.css",
       "ocr-manager.js",
       "websocket-manager.js",

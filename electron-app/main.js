@@ -1,4 +1,4 @@
-const { app, BrowserWindow, screen, ipcMain, Menu, dialog, systemPreferences } = require("electron");
+const { app, BrowserWindow, screen, ipcMain, Menu, dialog, systemPreferences, globalShortcut } = require("electron");
 const path = require("path");
 
 const OCRManager = require("./ocr-manager");
@@ -522,12 +522,16 @@ function createSuggestionsWindow() {
 }
 
 function createSettingsWindow() {
+  console.log('🔧 createSettingsWindow called');
+
   if (settingsWindow && !settingsWindow.isDestroyed()) {
+    console.log('✅ Settings window already exists, showing it');
     settingsWindow.show();
     settingsWindow.focus();
     return settingsWindow;
   }
 
+  console.log('📝 Creating new settings window');
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
 
   settingsWindow = new BrowserWindow({
@@ -550,10 +554,20 @@ function createSettingsWindow() {
     },
   });
 
-  settingsWindow.loadFile("settings.html");
+  settingsWindow.loadFile("settings.html").then(() => {
+    console.log('✅ Settings window loaded successfully');
+  }).catch(err => {
+    console.error('❌ Failed to load settings window:', err);
+  });
 
   settingsWindow.on('closed', () => {
+    console.log('🔒 Settings window closed');
     settingsWindow = null;
+  });
+
+  settingsWindow.on('ready-to-show', () => {
+    console.log('✅ Settings window ready to show');
+    settingsWindow.show();
   });
 
   return settingsWindow;
@@ -896,7 +910,6 @@ app.whenReady().then(async () => {
   Menu.setApplicationMenu(menu);
 
   // Register global shortcut for settings
-  const { globalShortcut } = require('electron');
   globalShortcut.register('CmdOrCtrl+Shift+S', () => {
     console.log('⚙️ Settings shortcut triggered');
     createSettingsWindow();

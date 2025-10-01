@@ -16,6 +16,12 @@ class Settings(BaseSettings):
     SUPABASE_URL: str
     SUPABASE_KEY: str
 
+    # AWS S3 settings
+    AWS_ACCESS_KEY_ID: str
+    AWS_SECRET_ACCESS_KEY: str
+    AWS_REGION: str = "us-east-1"
+    AWS_S3_BUCKET: str = "squire-screenshots"
+
     # OpenAI settings
     OPENAI_API_KEY: str
 
