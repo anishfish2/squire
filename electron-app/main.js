@@ -374,7 +374,7 @@ function createDebugWindow() {
     focusable: false,
     fullscreenable: false,
     alwaysOnTop: true,
-    type: 'panel',  // 🚀 Try panel type for better workspace behavior
+    type: 'panel',  // Required for workspace persistence (macOS warning is harmless)
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
@@ -455,7 +455,7 @@ function createSuggestionsWindow() {
     focusable: false,
     fullscreenable: false,
     alwaysOnTop: true,
-    type: 'panel',  // 🚀 Try panel type for better workspace behavior
+    type: 'panel',  // Required for workspace persistence (macOS warning is harmless)
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
