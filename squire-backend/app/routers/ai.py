@@ -1680,9 +1680,38 @@ async def process_batch_context(request: BatchContextRequest):
         )
 
         result = json.loads(response.choices[0].message.content)
-        suggestions = result.get("suggestions", [])
+        raw_suggestions = result.get("suggestions", [])
 
-        print(f"✅ Generated {len(suggestions)} batch suggestions")
+        print(f"✅ Generated {len(raw_suggestions)} batch suggestions")
+        print(f"📝 Model response:\n{json.dumps(result, indent=2)}")
+
+        # Transform suggestions to match frontend expected format
+        suggestions = []
+        for sug in raw_suggestions:
+            transformed = {
+                "type": sug.get("type", "general"),
+                "title": sug.get("title", ""),
+                "content": {
+                    "description": sug.get("description", ""),
+                    "expected_benefit": sug.get("workflow_context", ""),
+                    "difficulty": "medium",  # Default, can be enhanced later
+                    "time_investment": "5-15 minutes",  # Default, can be enhanced later
+                    "platforms": sug.get("relevant_apps", []),
+                    "tools_needed": sug.get("relevant_apps", []),
+                    "action_steps": [
+                        f"Review the context: {sug.get('workflow_context', '')}",
+                        f"Apply this suggestion in: {', '.join(sug.get('relevant_apps', []))}",
+                        "Monitor the results and adjust as needed"
+                    ],
+                    "requires_detailed_guide": False
+                },
+                "confidence": sug.get("confidence", 0.7),
+                "priority": sug.get("priority", "medium"),
+                "time_sensitive": sug.get("time_sensitive", False)
+            }
+            suggestions.append(transformed)
+
+        print(f"🔄 Transformed {len(suggestions)} suggestions to frontend format")
 
         # Filter duplicates if user history exists
         if user_history:

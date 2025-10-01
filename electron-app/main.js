@@ -282,9 +282,28 @@ class OCRBatchManager {
     };
 
     if (aiAssistant) {
-      const result = await aiAssistant.processBatchRequest(batchRequest);
+      console.log(`🚀 Calling processBatchRequest with ${batchRequest.app_sequence.length} apps`);
+      const suggestions = await aiAssistant.processBatchRequest(batchRequest);
 
-      console.log(`📦 Batch submitted for sequence ${sequenceId} - awaiting SSE results`);
+      console.log(`📦 Batch completed for sequence ${sequenceId}`);
+      console.log(`📊 Suggestions returned:`, JSON.stringify(suggestions, null, 2));
+
+      if (suggestions && suggestions.length > 0) {
+        console.log(`✅ Sending ${suggestions.length} suggestions to UI`);
+        const payload = {
+          textLines: [],
+          appName: batchRequest.app_sequence[batchRequest.app_sequence.length - 1]?.appName || 'Multiple Apps',
+          windowTitle: 'Batch Analysis',
+          aiSuggestions: suggestions
+        };
+        console.log(`📤 Payload:`, JSON.stringify(payload, null, 2));
+        sendToSuggestions('ocr-results', payload);
+        console.log(`✅ Sent to suggestions window`);
+      } else {
+        console.log(`⚠️ No suggestions to send (empty or null)`);
+      }
+    } else {
+      console.log(`❌ No aiAssistant available`);
     }
   }
 
@@ -340,20 +359,19 @@ function createMainWindow() {
 }
 
 
+
 function createDebugWindow() {
   debugWindow = new BrowserWindow({
     width: 300,
     height: 200,
     x: 20,
     y: 20,
-    alwaysOnTop: true,
     frame: false,
     transparent: true,
     resizable: true,
     movable: true,
     skipTaskbar: true,
     focusable: false,
-    visibleOnAllWorkspaces: true,
     fullscreenable: false,
     webPreferences: {
       nodeIntegration: true,
@@ -363,17 +381,17 @@ function createDebugWindow() {
 
   debugWindow.loadFile("debug.html");
 
-  // 🚀 Force overlay behavior
-  debugWindow.setAlwaysOnTop(true, "screen-saver");
-  debugWindow.setVisibleOnAllWorkspaces(true, {
-    visibleOnFullScreen: true,
-    skipTransformProcessType: true,
+  // 🚀 Make it stick across spaces
+  debugWindow.on("ready-to-show", () => {
+    debugWindow.setAlwaysOnTop(true, "floating"); // try "modal-panel" if still flaky
+    debugWindow.setVisibleOnAllWorkspaces(true, {
+      visibleOnFullScreen: true,
+      skipTransformProcessType: true,
+    });
   });
-  debugWindow.setFullScreenable(false);
 
   return debugWindow;
 }
-
 
 function createSuggestionsWindow() {
   const { width } = screen.getPrimaryDisplay().workAreaSize;
@@ -383,14 +401,12 @@ function createSuggestionsWindow() {
     height: 500,
     x: width - 420,
     y: 20,
-    alwaysOnTop: true,
     frame: false,
     transparent: true,
     resizable: true,
     movable: true,
     skipTaskbar: true,
     focusable: false,
-    visibleOnAllWorkspaces: true,
     fullscreenable: false,
     webPreferences: {
       nodeIntegration: true,
@@ -400,16 +416,18 @@ function createSuggestionsWindow() {
 
   suggestionsWindow.loadFile("suggestions.html");
 
-  // 🚀 Force overlay behavior
-  suggestionsWindow.setAlwaysOnTop(true, "screen-saver");
-  suggestionsWindow.setVisibleOnAllWorkspaces(true, {
-    visibleOnFullScreen: true,
-    skipTransformProcessType: true,
+  // 🚀 Make it stick across spaces
+  suggestionsWindow.on("ready-to-show", () => {
+    suggestionsWindow.setAlwaysOnTop(true, "floating");
+    suggestionsWindow.setVisibleOnAllWorkspaces(true, {
+      visibleOnFullScreen: true,
+      skipTransformProcessType: true,
+    });
   });
-  suggestionsWindow.setFullScreenable(false);
 
   return suggestionsWindow;
 }
+
 
 
 async function processAppOCR(appInfo, reason = "app_switch") {
