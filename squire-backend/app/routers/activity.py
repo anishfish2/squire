@@ -71,11 +71,15 @@ async def store_activity_batch(activity_data: ActivityBatchRequest):
         events_to_insert = []
 
         for event in activity_data.events:
+            # Skip keystroke events - they should be sent to /api/ai/keystroke-analysis
+            if event.action == "key_press" or event.action == "keystroke":
+                print(f"⚠️ Skipping keystroke event - use /api/ai/keystroke-analysis endpoint")
+                continue
+
             importance_score = {
                 "app_switch": 0.7,
                 "window_switch": 0.5,
                 "mouse_click": 0.3,
-                "key_press": 0.2,
                 "mouse_move": 0.1
             }.get(event.action, 0.3)
 

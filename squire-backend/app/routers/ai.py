@@ -201,7 +201,8 @@ Return only the JSON object, no other text."""
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
-            max_tokens=200
+            max_tokens=200,
+            response_format={"type": "json_object"}
         )
 
         result_text = response.choices[0].message.content.strip()
@@ -214,14 +215,19 @@ Return only the JSON object, no other text."""
                 result_text = result_text[4:]
         result_text = result_text.strip()
 
-        context_data = json.loads(result_text)
-        result = {
-            "context_type": context_data.get("context_type", "general"),
-            "domain": context_data.get("domain", "general"),
-            "activity_summary": context_data.get("activity_summary", "")
-        }
-        print(f"✅ Session context extracted: {result['context_type']}/{result['domain']}")
-        return result
+        try:
+            context_data = json.loads(result_text)
+            result = {
+                "context_type": context_data.get("context_type", "general"),
+                "domain": context_data.get("domain", "general"),
+                "activity_summary": context_data.get("activity_summary", "")
+            }
+            print(f"✅ Session context extracted: {result['context_type']}/{result['domain']}")
+            return result
+        except json.JSONDecodeError as json_err:
+            print(f"❌ Failed to parse JSON response: {json_err}")
+            print(f"   Raw response (first 200 chars): {result_text[:200]}")
+            return {"context_type": "general", "domain": "general", "activity_summary": ""}
 
     except Exception as e:
         print(f"❌ Failed to extract session context: {e}")
@@ -742,7 +748,7 @@ If no novel suggestion possible, return: {{"suggestions": []}}"""
 
     return prompt
 
-async def build_batch_openai_prompt(request: BatchContextRequest, user_history: dict = None, recent_ocr_context: str = "") -> str:
+async def build_batch_openai_prompt(request: BatchContextRequest, user_history: dict = None) -> str:
     """Build sequence-aware OpenAI prompt with full context integration"""
 
     print(f"📦 Building batch prompt for {len(request.app_sequence)} apps")
@@ -764,13 +770,11 @@ async def build_batch_openai_prompt(request: BatchContextRequest, user_history: 
             sequence_context += f" - {app.windowTitle}"
         sequence_context += f" (trigger: {app.trigger_reason})\n"
 
-        # Use pre-extracted meaningful context instead of raw OCR
+        # Use pre-extracted meaningful context only (never raw OCR)
         if app.meaningful_context:
             sequence_context += f"   Context:\n{app.meaningful_context}\n"
-        elif app.ocrText and len(app.ocrText) > 0:
-            sequence_context += f"   Context: • Raw OCR content available but not summarized\n"
         else:
-            sequence_context += f"   Context: • No content detected\n"
+            sequence_context += f"   Context: • No context available\n"
 
         # Add OCR enhanced fields
         if hasattr(app, 'application_type') and app.application_type:
@@ -787,39 +791,45 @@ async def build_batch_openai_prompt(request: BatchContextRequest, user_history: 
     # Get enhanced context analysis for the most recent app
     if request.app_sequence:
         latest_app = request.app_sequence[-1]
-        try:
-            # Use meaningful_context if available, otherwise fall back to raw OCR
-            context_for_analysis = latest_app.meaningful_context or latest_app.ocrText
 
-            current_context = await analyze_current_context(
-                context_for_analysis,
-                latest_app.appName,
-                None
-            )
-            multi_level_context = await analyze_multi_level_context(
-                context_for_analysis,
-                latest_app.appName,
-                user_history
-            )
+        # Only analyze if we have meaningful context
+        if latest_app.meaningful_context:
+            try:
+                # Use meaningful context (not raw OCR)
+                context_for_analysis = [latest_app.meaningful_context]
 
-            sequence_context += f"\nENHANCED CONTEXT ANALYSIS (Current State):\n"
-            sequence_context += f"• Current activity: {current_context.current_activity}\n"
-            sequence_context += f"• Activity type: {current_context.context_type}\n"
-            sequence_context += f"• Domain: {current_context.domain}\n"
-            if current_context.concepts:
-                sequence_context += f"• Key concepts: {', '.join(current_context.concepts)}\n"
-            if current_context.tools:
-                sequence_context += f"• Tools in use: {', '.join(current_context.tools)}\n"
+                current_context = await analyze_current_context(
+                    context_for_analysis,
+                    latest_app.appName,
+                    None
+                )
+                multi_level_context = await analyze_multi_level_context(
+                    context_for_analysis,
+                    latest_app.appName,
+                    user_history
+                )
 
-            sequence_context += f"\nMULTI-LEVEL CONTEXT:\n"
-            sequence_context += f"• Right now: {multi_level_context.micro}\n"
-            sequence_context += f"• Current task: {multi_level_context.task}\n"
-            sequence_context += f"• App session: {multi_level_context.app}\n"
-            sequence_context += f"• Overall session: {multi_level_context.session}\n"
+                sequence_context += f"\nENHANCED CONTEXT ANALYSIS (Current State):\n"
+                sequence_context += f"• Current activity: {current_context.current_activity}\n"
+                sequence_context += f"• Activity type: {current_context.context_type}\n"
+                sequence_context += f"• Domain: {current_context.domain}\n"
+                if current_context.concepts:
+                    sequence_context += f"• Key concepts: {', '.join(current_context.concepts)}\n"
+                if current_context.tools:
+                    sequence_context += f"• Tools in use: {', '.join(current_context.tools)}\n"
 
-            print("✅ Batch OCR context added to prompt")
-        except Exception as e:
-            print(f"⚠️ Batch context analysis failed: {e}")
+                sequence_context += f"\nMULTI-LEVEL CONTEXT:\n"
+                sequence_context += f"• Right now: {multi_level_context.micro}\n"
+                sequence_context += f"• Current task: {multi_level_context.task}\n"
+                sequence_context += f"• App session: {multi_level_context.app}\n"
+                sequence_context += f"• Overall session: {multi_level_context.session}\n"
+
+                print("✅ Batch context analysis completed")
+            except Exception as e:
+                print(f"⚠️ Batch context analysis failed: {e}")
+                sequence_context += f"\nContext analysis not available\n"
+        else:
+            print("⚠️ No meaningful context for enhanced analysis, skipping")
             sequence_context += f"\nContext analysis not available\n"
 
     # Add comprehensive user history context
@@ -923,8 +933,6 @@ async def build_batch_openai_prompt(request: BatchContextRequest, user_history: 
     prompt = f"""You are an AI assistant analyzing a detailed user workflow sequence to provide highly contextual suggestions.
 
 {sequence_context}
-
-{recent_ocr_context}
 
 {history_context}
 
@@ -1642,16 +1650,8 @@ async def process_batch_context(request: BatchContextRequest):
         # Get user history for personalization
         user_history = await get_user_history(UUID(request.user_id)) if request.user_id else None
 
-        # Build the recent OCR context from app sequence
-        recent_ocr_lines = []
-        for app_item in request.app_sequence[-3:]:  # Last 3 apps
-            if app_item.ocrText:
-                recent_ocr_lines.extend(app_item.ocrText)
-
-        recent_ocr_context = '\n'.join(recent_ocr_lines[-100:]) if recent_ocr_lines else ""
-
-        # Build the LLM prompt
-        prompt = await build_batch_openai_prompt(request, user_history, recent_ocr_context)
+        # Build the LLM prompt (no raw OCR context - only meaningful summaries in prompt)
+        prompt = await build_batch_openai_prompt(request, user_history)
 
         # Call OpenAI
         client = get_openai_client()
@@ -1723,6 +1723,27 @@ async def get_ocr_queue_stats():
         stats = await ocr_job_manager.get_queue_stats()
         return stats
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/keystroke-analysis")
+async def process_keystroke_analysis(request: dict):
+    """Process keystroke sequence and analyze patterns"""
+    try:
+        user_id = request.get('user_id')
+        sequence_data = request.get('sequence_data', {})
+        session_context = request.get('session_context', {})
+
+        if not user_id or not sequence_data:
+            raise HTTPException(status_code=400, detail="user_id and sequence_data required")
+
+        result = await keystroke_analysis_service.process_keystroke_sequence(
+            user_id, sequence_data, session_context
+        )
+
+        return result
+    except Exception as e:
+        print(f"❌ Keystroke analysis error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

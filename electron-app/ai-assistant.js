@@ -1,6 +1,6 @@
 class AIAssistant {
   constructor() {
-    this.backendUrl = 'http:
+    this.backendUrl = 'http://127.0.0.1:8000';
     this.userContext = {
       preferences: {},
       recentApps: new Map(),

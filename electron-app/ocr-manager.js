@@ -6,7 +6,7 @@ class OCRManager {
   constructor(overlayWindow = null) {
     this.isProcessing = false;
     this.overlayWindow = overlayWindow;
-    this.backendUrl = 'http:
+    this.backendUrl = 'http://127.0.0.1:8000';
 
     this.lastOCRContent = [];
     this.lastOCRTimestamp = 0;

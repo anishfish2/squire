@@ -21,7 +21,7 @@ class ComprehensiveActivityTracker {
     this.eventBuffer = [];
     this.bufferFlushInterval = null;
 
-    this.backendUrl = "http:
+    this.backendUrl = "http://127.0.0.1:8000";
     this.userId = userId || "550e8400-e29b-41d4-a716-446655440000";
     this.sessionId = sessionId;
 
@@ -250,12 +250,9 @@ class ComprehensiveActivityTracker {
     keyToTrack.forEach((key) => {
       try {
         globalShortcut.register(key, () => {
-          this.addEvent("keystroke", {
-            timestamp: Date.now(),
-            key: key,
-            app: this.currentApp,
-            window: this.currentWindow,
-          });
+          // NOTE: Keystroke events are now handled by keystroke-collector.js
+          // and sent to /api/ai/keystroke-analysis endpoint
+          // We only track stats here, not send events to user_events table
 
           this.sessionStats.keystrokes++;
           this.lastActivityTime = Date.now();

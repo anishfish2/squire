@@ -504,7 +504,7 @@ async function processAppOCR(appInfo, reason = "app_switch") {
 async function processKeystrokeSequence(sequenceData) {
   try {
 
-    const response = await fetch('http:
+    const response = await fetch('http://127.0.0.1:8000/api/ai/keystroke-analysis', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -538,7 +538,7 @@ async function createUserSession() {
   try {
 
     try {
-      const existingSessionResponse = await fetch(`http:
+      const existingSessionResponse = await fetch(`http://127.0.0.1:8000/api/activity/current-session/${currentUserId}`, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
@@ -549,7 +549,7 @@ async function createUserSession() {
         const existingResult = await existingSessionResponse.json();
 
         try {
-          await fetch(`http:
+          await fetch(`http://127.0.0.1:8000/api/activity/end-session/${existingResult.session_id}`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -577,7 +577,7 @@ async function createUserSession() {
         timezone: "UTC"
       };
 
-      const profileResponse = await fetch("http:
+      const profileResponse = await fetch("http://127.0.0.1:8000/api/activity/profiles", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -610,7 +610,7 @@ async function createUserSession() {
       updated_at: new Date().toISOString()
     };
 
-    const sessionResponse = await fetch("http:
+    const sessionResponse = await fetch("http://127.0.0.1:8000/api/activity/sessions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

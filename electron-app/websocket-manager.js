@@ -6,7 +6,7 @@ class WebSocketManager {
     this.isConnected = false;
     this.userId = null;
     this.sessionId = null;
-    this.backendUrl = 'http:
+    this.backendUrl = 'http://127.0.0.1:8000';
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 5;
     this.reconnectDelay = 1000;

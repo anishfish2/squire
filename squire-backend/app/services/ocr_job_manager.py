@@ -348,29 +348,35 @@ class OCRJobManager:
             if not user_id:
                 return
 
-            ocr_text = job.get("ocr_text", [])
             meaningful_context = job.get("meaningful_context", "")
+            ocr_text = job.get("ocr_text", [])
 
-            if not ocr_text or len(ocr_text) == 0:
-                print("⚠️ No OCR text for knowledge graph")
+            # Prefer meaningful context, fallback to raw OCR only if needed
+            if not meaningful_context and (not ocr_text or len(ocr_text) == 0):
+                print("⚠️ No context available for knowledge graph")
                 return
 
-            print(f"🧠 Processing OCR for knowledge graph: {len(ocr_text)} lines")
+            # Use meaningful context if available, otherwise use raw OCR
+            content_for_analysis = meaningful_context if meaningful_context else '\n'.join(ocr_text[:50])
+
+            if meaningful_context:
+                print(f"🧠 Processing meaningful context for knowledge graph")
+            else:
+                print(f"🧠 Processing raw OCR for knowledge graph: {len(ocr_text)} lines")
 
             client = get_openai_client()
             if not client:
                 print("❌ No OpenAI client for knowledge graph")
                 return
 
-            content = '\n'.join(ocr_text[:50])
+            content = content_for_analysis
 
             prompt = f"""Analyze this user's screen content and extract knowledge graph insights about their work patterns, goals, habits, and expertise.
 
 APP: {job.get("app_name", "")}
 WINDOW: {job.get("window_title", "")}
-CONTEXT: {meaningful_context}
 
-SCREEN CONTENT:
+CONTEXT SUMMARY:
 {content}
 
 Extract insights in these categories:
