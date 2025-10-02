@@ -69,6 +69,40 @@ ipcRenderer.on('preference-updated', (event, { appName, updates }) => {
   renderAppList();
 });
 
+ipcRenderer.on('app-detected', (event, { appName, allApps }) => {
+  console.log('New app detected:', appName);
+  console.log('All detected apps:', allApps);
+
+  // Update detected apps set
+  detectedApps = new Set(allApps);
+
+  // Check if this app already has preferences
+  const exists = appPreferences.find(p => p.app_name === appName);
+  if (!exists) {
+    // Add with defaults locally
+    const newPref = {
+      app_name: appName,
+      allow_ocr: true,
+      allow_vision: false,
+      allow_screenshots: false,
+      ocr_frequency: 'normal',
+      vision_frequency: 'low'
+    };
+
+    appPreferences.push(newPref);
+
+    // Sort alphabetically
+    appPreferences.sort((a, b) => a.app_name.localeCompare(b.app_name));
+
+    // Save to database immediately
+    updatePreference(appName, newPref);
+  }
+
+  // Re-render
+  renderAppList();
+  updateLastUpdated();
+});
+
 // Functions
 function loadAppPreferences() {
   ipcRenderer.send('load-app-preferences');

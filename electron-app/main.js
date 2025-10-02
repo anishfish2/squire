@@ -40,6 +40,12 @@ function sendToSuggestions(channel, data) {
   }
 }
 
+function sendToSettings(channel, data) {
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    settingsWindow.webContents.send(channel, data);
+  }
+}
+
 class SmartOCRScheduler {
   constructor(delay = 500) {
     this.delay = delay;
@@ -831,7 +837,17 @@ function setupPipelines() {
 
       // Track detected app for settings UI
       if (appInfo.appName) {
+        const wasNewApp = !detectedApps.has(appInfo.appName);
         detectedApps.add(appInfo.appName);
+
+        // Broadcast to settings window if it's open
+        if (wasNewApp) {
+          console.log(`📱 New app detected: ${appInfo.appName}`);
+          sendToSettings('app-detected', {
+            appName: appInfo.appName,
+            allApps: Array.from(detectedApps)
+          });
+        }
       }
 
       if (keystrokeCollector) {
