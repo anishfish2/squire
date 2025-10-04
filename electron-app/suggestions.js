@@ -87,43 +87,47 @@ function updateOCRText(textLines, aiSuggestions = [], appName = '') {
   if (aiSuggestions && aiSuggestions.length > 0) {
     aiSuggestions.forEach((suggestion, index) => {
       const suggestionDiv = document.createElement('div');
-      suggestionDiv.className = 'bg-white/[0.06] text-white p-4 mb-3 rounded-xl font-sans border border-white/10 shadow-[0_4px_12px_rgba(0,0,0,0.2),inset_0_1px_1px_rgba(255,255,255,0.08)] backdrop-blur-xl max-w-[380px] transition-all duration-200 ease-out hover:bg-white/[0.09] hover:border-white/15 hover:-translate-y-px hover:shadow-[0_6px_20px_rgba(0,0,0,0.3),inset_0_1px_1px_rgba(255,255,255,0.12)]';
-      suggestionDiv.onclick = () => {
-        console.log('Clicked suggestion:', suggestion.title);
-      };
+      suggestionDiv.className = 'bg-white/[0.06] text-white p-3 mb-3 rounded-xl font-sans border border-white/10 shadow-[0_4px_12px_rgba(0,0,0,0.2),inset_0_1px_1px_rgba(255,255,255,0.08)] backdrop-blur-xl max-w-[380px] transition-all duration-200 ease-out';
 
+      const shortDesc = suggestion.content.short_description || suggestion.title;
       const needsGuide = suggestion.content.requires_detailed_guide;
-      const guideButton = needsGuide
-        ? `<button class="mt-2.5 px-3 py-1.5 text-xs bg-white/10 text-white/90 border border-white/20 rounded-lg cursor-pointer hover:bg-white/15 hover:border-white/30 font-medium shadow-sm transition-all hover:shadow-md" onclick="showDetailedGuide(this, ${JSON.stringify(
-            suggestion
-          ).replace(/"/g, '&quot;')})">📋 Step-by-step guide</button>`
-        : '';
 
-      // Build expanded suggestion UI with Tailwind classes
+      // Create collapsible suggestion UI
       suggestionDiv.innerHTML = `
-        <h3 class="m-0 mb-1.5 text-base font-semibold text-white/95">${suggestion.title}</h3>
-        <p class="text-sm mb-2.5 text-white/75 leading-snug">${suggestion.content.description}</p>
-
-        <div class="text-xs space-y-0.5 text-white/70 mb-2.5">
-          <div class="flex gap-1.5"><span class="text-white/50 min-w-[90px]">Benefit:</span><span class="text-white/80">${suggestion.content.expected_benefit || '—'}</span></div>
-          <div class="flex gap-1.5"><span class="text-white/50 min-w-[90px]">Difficulty:</span><span class="text-white/80">${suggestion.content.difficulty || '—'}</span></div>
-          <div class="flex gap-1.5"><span class="text-white/50 min-w-[90px]">Time:</span><span class="text-white/80">${suggestion.content.time_investment || '—'}</span></div>
-          <div class="flex gap-1.5"><span class="text-white/50 min-w-[90px]">Platforms:</span><span class="text-white/80">${(suggestion.content.platforms || []).join(', ') || '—'}</span></div>
-          <div class="flex gap-1.5"><span class="text-white/50 min-w-[90px]">Tools:</span><span class="text-white/80">${(suggestion.content.tools_needed || []).join(', ') || '—'}</span></div>
+        <div class="short-view cursor-pointer" onclick="toggleSuggestion(${index})">
+          <div class="flex items-start justify-between gap-2">
+            <p class="text-sm text-white/90 leading-snug flex-1">${shortDesc}</p>
+            <span class="expand-icon text-white/50 text-xs">▼</span>
+          </div>
         </div>
 
-        <div class="text-xs">
-          <div class="font-medium text-white/90 mb-1">Action Steps:</div>
-          <ul class="ml-4 space-y-0.5 text-white/75">
-            ${(suggestion.content.action_steps || [])
-              .map(step => `<li class="leading-snug">${step}</li>`)
-              .join('')}
-          </ul>
-        </div>
+        <div class="full-view hidden mt-3 pt-3 border-t border-white/10" id="suggestion-details-${index}">
+          <h3 class="m-0 mb-2 text-base font-semibold text-white/95">${suggestion.title}</h3>
+          <p class="text-sm mb-3 text-white/75 leading-snug">${suggestion.content.description}</p>
 
-        ${guideButton}
-        <div class="hidden mt-2.5 p-2.5 bg-white/5 rounded-lg border-l-2 border-l-white/20 max-h-[300px] overflow-y-auto" id="guide-${index}"></div>
+          <div class="text-xs space-y-1 text-white/70 mb-3">
+            <div class="flex gap-1.5"><span class="text-white/50 min-w-[70px]">Benefit:</span><span class="text-white/80">${suggestion.content.expected_benefit || '—'}</span></div>
+            <div class="flex gap-1.5"><span class="text-white/50 min-w-[70px]">Difficulty:</span><span class="text-white/80">${suggestion.content.difficulty || '—'}</span></div>
+            <div class="flex gap-1.5"><span class="text-white/50 min-w-[70px]">Time:</span><span class="text-white/80">${suggestion.content.time_investment || '—'}</span></div>
+            ${(suggestion.content.platforms || []).length > 0 ? `<div class="flex gap-1.5"><span class="text-white/50 min-w-[70px]">Platforms:</span><span class="text-white/80">${suggestion.content.platforms.join(', ')}</span></div>` : ''}
+            ${(suggestion.content.tools_needed || []).length > 0 ? `<div class="flex gap-1.5"><span class="text-white/50 min-w-[70px]">Tools:</span><span class="text-white/80">${suggestion.content.tools_needed.join(', ')}</span></div>` : ''}
+          </div>
+
+          ${(suggestion.content.action_steps || []).length > 0 ? `
+            <div class="text-xs mb-3">
+              <div class="font-medium text-white/90 mb-1">Action Steps:</div>
+              <ul class="ml-4 space-y-0.5 text-white/75">
+                ${suggestion.content.action_steps.map(step => `<li class="leading-snug">${step}</li>`).join('')}
+              </ul>
+            </div>
+          ` : ''}
+
+          ${needsGuide ? `<button class="mt-2 px-3 py-1.5 text-xs bg-white/10 text-white/90 border border-white/20 rounded-lg cursor-pointer hover:bg-white/15 hover:border-white/30 font-medium shadow-sm transition-all hover:shadow-md" onclick="event.stopPropagation(); showDetailedGuide(this, ${JSON.stringify(suggestion).replace(/"/g, '&quot;')})">📋 Step-by-step guide</button>` : ''}
+
+          <div class="hidden mt-2.5 p-2.5 bg-white/5 rounded-lg border-l-2 border-l-white/20 max-h-[300px] overflow-y-auto" id="guide-${index}"></div>
+        </div>
       `;
+
       ocrResults.appendChild(suggestionDiv);
     });
   }
@@ -185,6 +189,21 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
+// Toggle suggestion expansion
+window.toggleSuggestion = function(index) {
+  const detailsDiv = document.getElementById(`suggestion-details-${index}`);
+  const shortView = detailsDiv.previousElementSibling;
+  const icon = shortView.querySelector('.expand-icon');
+
+  if (detailsDiv.classList.contains('hidden')) {
+    detailsDiv.classList.remove('hidden');
+    icon.textContent = '▲';
+  } else {
+    detailsDiv.classList.add('hidden');
+    icon.textContent = '▼';
+  }
+};
+
 // Global function for guide buttons
 window.showDetailedGuide = function(button, suggestion) {
   console.log('Showing detailed guide for:', suggestion.title);
@@ -204,9 +223,19 @@ let dragState = {
 };
 
 function onBoxMouseDown(e) {
-  // Only allow dragging if not clicking on interactive elements or scrollable content
+  // Only allow dragging if not clicking on interactive elements or content
   if (e.target.tagName === 'BUTTON' || e.target.closest('button')) return;
-  if (e.target.closest('.text-content')) return; // Allow scrolling in content area
+  if (e.target.closest('.short-view')) return; // Allow clicking to expand
+  if (e.target.closest('.full-view')) return; // Allow interaction with expanded details
+
+  // Allow all interaction within text-content area (clicking, scrolling, selecting text)
+  if (e.target.closest('.text-content')) {
+    // Check if this is specifically on a scrollable container
+    const scrollContainer = e.target.closest('.text-content');
+    if (scrollContainer && scrollContainer.scrollHeight > scrollContainer.clientHeight) {
+      return; // Allow scrolling
+    }
+  }
 
   // Ensure mouse events are not ignored during drag
   ipcRenderer.send('suggestions-set-ignore-mouse-events', false);

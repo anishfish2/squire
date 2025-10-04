@@ -1132,6 +1132,8 @@ ipcMain.on("get-detected-apps", (event) => {
 
 ipcMain.on("load-app-preferences", async (event) => {
   try {
+    console.log(`⚙️ [Main] Loading app preferences for user: ${currentUserId}`);
+
     const response = await fetch(`http://127.0.0.1:8000/api/vision/preferences/${currentUserId}`, {
       method: "GET",
       headers: {
@@ -1141,19 +1143,22 @@ ipcMain.on("load-app-preferences", async (event) => {
 
     if (response.ok) {
       const prefs = await response.json();
+      console.log(`✅ [Main] Loaded ${prefs.length} app preferences from backend`);
       event.reply("app-preferences-loaded", prefs);
     } else {
-      console.error("Failed to load app preferences:", response.status);
+      console.error(`❌ [Main] Failed to load app preferences: ${response.status}`);
       event.reply("app-preferences-loaded", []);
     }
   } catch (error) {
-    console.error("Error loading app preferences:", error);
+    console.error("❌ [Main] Error loading app preferences:", error);
     event.reply("app-preferences-loaded", []);
   }
 });
 
 ipcMain.on("update-app-preference", async (event, { appName, updates }) => {
   try {
+    console.log(`⚙️ [Main] Updating preference for "${appName}":`, updates);
+
     const response = await fetch(`http://127.0.0.1:8000/api/vision/preferences/${currentUserId}/${appName}`, {
       method: "PUT",
       headers: {
@@ -1163,7 +1168,8 @@ ipcMain.on("update-app-preference", async (event, { appName, updates }) => {
     });
 
     if (response.ok) {
-      console.log(`✅ Updated preference for ${appName}:`, updates);
+      const result = await response.json();
+      console.log(`✅ [Main] Updated preference for "${appName}":`, updates);
 
       // Update local cache
       appPreferences.set(appName, { ...appPreferences.get(appName), ...updates });
@@ -1173,12 +1179,14 @@ ipcMain.on("update-app-preference", async (event, { appName, updates }) => {
         visionScheduler.refreshAppPreference(appName);
       }
 
-      event.reply("preference-updated", { appName, updates });
+      // Send confirmation back with full updated preference
+      event.reply("preference-updated", { appName, updates: result.data || updates });
     } else {
-      console.error(`Failed to update preference for ${appName}:`, response.status);
+      const errorText = await response.text();
+      console.error(`❌ [Main] Failed to update preference for "${appName}": ${response.status}`, errorText);
     }
   } catch (error) {
-    console.error(`Error updating preference for ${appName}:`, error);
+    console.error(`❌ [Main] Error updating preference for "${appName}":`, error);
   }
 });
 

@@ -4,6 +4,8 @@ const { ipcRenderer } = require('electron');
 // State
 let appPreferences = [];
 let detectedApps = new Set();
+let preferencesLoaded = false;
+let detectedAppsLoaded = false;
 
 // DOM Elements
 let appList, searchInput, totalAppsEl, ocrEnabledEl, visionEnabledEl, lastUpdatedEl;
@@ -44,16 +46,24 @@ document.addEventListener('DOMContentLoaded', () => {
     ipcRenderer.send('toggle-global-vision', e.target.checked);
   });
 
-  // Load initial data
+  // Load initial data - preferences first, then detected apps
   loadAppPreferences();
-  requestDetectedApps();
 });
 
 // IPC Listeners
 ipcRenderer.on('detected-apps', (event, apps) => {
-  console.log('Received detected apps:', apps);
+  console.log('⚙️ [Settings] Received detected apps:', apps.length, 'apps');
   detectedApps = new Set(apps);
-  mergeWithPreferences();
+  detectedAppsLoaded = true;
+
+  // Only merge if preferences are already loaded
+  if (preferencesLoaded) {
+    console.log('⚙️ [Settings] Merging detected apps with preferences...');
+    mergeWithPreferences();
+  } else {
+    console.log('⚠️ [Settings] Preferences not loaded yet, skipping merge');
+  }
+
   renderAppList();
 });
 
@@ -64,31 +74,40 @@ ipcRenderer.on('app-preferences-loaded', (event, preferences) => {
   });
 
   appPreferences = preferences;
+  preferencesLoaded = true;
 
   // Mark all apps from database as detected
   preferences.forEach(pref => {
     detectedApps.add(pref.app_name);
   });
 
+  console.log('⚙️ [Settings] Preferences loaded, now requesting detected apps...');
+
+  // Now request detected apps (ensures preferences are loaded first)
+  requestDetectedApps();
+
+  // Render with what we have
   renderAppList();
 });
 
 ipcRenderer.on('preference-updated', (event, { appName, updates }) => {
-  console.log('Preference updated:', appName, updates);
+  console.log('⚙️ [Settings] Preference updated from backend:', appName, updates);
   updateLocalPreference(appName, updates);
   renderAppList();
+  updateStats();
 });
 
 ipcRenderer.on('app-detected', (event, { appName, allApps }) => {
-  console.log('New app detected:', appName);
-  console.log('All detected apps:', allApps);
+  console.log('⚙️ [Settings] New app detected:', appName);
 
   // Update detected apps set
   detectedApps = new Set(allApps);
 
   // Check if this app already has preferences
   const exists = appPreferences.find(p => p.app_name === appName);
-  if (!exists) {
+  if (!exists && preferencesLoaded) {
+    console.log(`⚙️ [Settings] Adding new app "${appName}" to preferences`);
+
     // Add with defaults locally
     const newPref = {
       app_name: appName,
@@ -106,11 +125,15 @@ ipcRenderer.on('app-detected', (event, { appName, allApps }) => {
 
     // Save to database immediately
     updatePreference(appName, newPref);
-  }
 
-  // Re-render
-  renderAppList();
-  updateLastUpdated();
+    // Re-render
+    renderAppList();
+    updateLastUpdated();
+  } else if (exists) {
+    console.log(`⚙️ [Settings] App "${appName}" already in preferences, skipping`);
+  } else {
+    console.log(`⚠️ [Settings] Preferences not loaded yet, skipping app "${appName}"`);
+  }
 });
 
 // Functions
@@ -138,10 +161,12 @@ function refreshApps() {
 
 function mergeWithPreferences() {
   // Create preferences for newly detected apps
+  let newAppsAdded = 0;
+
   detectedApps.forEach(appName => {
     const exists = appPreferences.find(p => p.app_name === appName);
     if (!exists) {
-      console.log(`⚙️ Creating default preferences for new app: ${appName}`);
+      console.log(`⚙️ [Settings] Creating default preferences for new app: ${appName}`);
 
       const newPref = {
         app_name: appName,
@@ -153,11 +178,16 @@ function mergeWithPreferences() {
       };
 
       appPreferences.push(newPref);
+      newAppsAdded++;
 
-      // IMPORTANT: Save to database immediately
+      // Save to database immediately (but don't wait for response)
       updatePreference(appName, newPref);
     }
   });
+
+  if (newAppsAdded > 0) {
+    console.log(`⚙️ [Settings] Added ${newAppsAdded} new app(s) to preferences`);
+  }
 
   // Sort alphabetically
   appPreferences.sort((a, b) => a.app_name.localeCompare(b.app_name));
