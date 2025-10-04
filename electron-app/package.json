@@ -62,6 +62,7 @@
       "activity-tracker.js",
       "keystroke-collector.js",
       "ai-assistant.js",
+      "vision-scheduler.js",
       "node_modules/**/*"
     ],
     "asarUnpack": [

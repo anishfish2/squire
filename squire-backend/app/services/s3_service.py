@@ -41,21 +41,21 @@ class S3Service:
             print(f"❌ Failed to initialize S3 client: {e}")
             self.s3_client = None
 
-    def _generate_storage_path(self, user_id: str, screenshot_id: str, extension: str = "png") -> str:
+    def _generate_storage_path(self, user_id: str, session_id: str, screenshot_id: str, extension: str = "png") -> str:
         """
         Generate a structured path for storing screenshots
-        Format: {user_id}/{year}/{month}/{screenshot_id}.{extension}
+        Format: {user_id}/{session_id}/{timestamp}.{extension}
         """
         now = datetime.utcnow()
-        year = now.strftime("%Y")
-        month = now.strftime("%m")
+        timestamp = now.strftime("%Y%m%d_%H%M%S_%f")[:-3]  # YYYYmmdd_HHMMSS_milliseconds
 
-        return f"{user_id}/{year}/{month}/{screenshot_id}.{extension}"
+        return f"{user_id}/{session_id}/{timestamp}.{extension}"
 
     async def upload_screenshot(
         self,
         user_id: str,
         screenshot_data: bytes,
+        session_id: str,
         screenshot_id: Optional[str] = None,
         content_type: str = "image/png"
     ) -> dict:
@@ -65,6 +65,7 @@ class S3Service:
         Args:
             user_id: User ID
             screenshot_data: Screenshot binary data
+            session_id: Session ID
             screenshot_id: Optional screenshot ID (generates UUID if not provided)
             content_type: MIME type (default: image/png)
 
@@ -78,7 +79,7 @@ class S3Service:
             screenshot_id = str(uuid.uuid4())
 
         extension = "png" if "png" in content_type else "jpg"
-        storage_path = self._generate_storage_path(user_id, screenshot_id, extension)
+        storage_path = self._generate_storage_path(user_id, session_id, screenshot_id, extension)
 
         try:
             # Upload to S3

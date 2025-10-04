@@ -14,6 +14,7 @@ from app.core.database import get_supabase, execute_query, DatabaseError
 from app.services.ocr_service import PaddleOCRService
 from app.services.keystroke_analysis_service import KeystrokeAnalysisService
 from app.services.ocr_job_manager import OCRJobManager, JobPriority
+from app.services.vision_job_manager import vision_job_manager
 from app.models.schemas import (
     AIContextRequest,
     AIContextResponse,
@@ -749,8 +750,107 @@ If no novel suggestion possible, return: {{"suggestions": []}}"""
 
     return prompt
 
+
+async def get_vision_context(user_id: str, app_name: Optional[str] = None, limit: int = 3) -> str:
+    """
+    Fetch recent UNUSED vision insights for a user.
+
+    Returns formatted vision context string for LLM prompt.
+    Marks retrieved events as used so they won't be reused.
+    """
+    try:
+        print(f"\n{'='*60}")
+        print(f"🔮 [AI] GET VISION CONTEXT")
+        print(f"   User ID: {user_id}")
+        print(f"   App filter: {app_name or 'all apps'}")
+        print(f"   Limit: {limit}")
+
+        # Get recent UNUSED vision events (only from last 60 minutes)
+        vision_events = await vision_job_manager.get_recent_vision_events(
+            user_id=user_id,
+            limit=limit,
+            app_name=app_name,
+            max_age_minutes=60,
+            only_unused=True  # Only get unused events
+        )
+
+        if not vision_events:
+            print("⚠️ No unused vision events found (check VisionJobManager logs above)")
+            print(f"{'='*60}\n")
+            return ""
+
+        print(f"   Retrieved {len(vision_events)} UNUSED vision events")
+
+        vision_context = "\n🔮 VISION INSIGHTS (Visual Context from Screenshots):\n"
+        events_added = 0
+        event_ids_to_mark = []
+
+        for i, event in enumerate(vision_events, 1):
+            analysis = event.get("vision_analysis", {})
+
+            if not analysis or "error" in analysis:
+                print(f"   ⚠️ Event {i} skipped (no analysis or error)")
+                continue
+
+            event_id = event.get("id")
+            event_app = event.get("app_name", "Unknown App")
+            event_time = event.get("created_at", "unknown time")
+            print(f"   ✅ Event {i}: {event_app} at {event_time} [id={event_id}]")
+
+            vision_context += f"\n{i}. {event_app} (at {event_time}):\n"
+
+            # Add task/activity
+            task = analysis.get("task", "")
+            if task:
+                vision_context += f"   • Task: {task}\n"
+
+            # Add UI elements (limit to 5)
+            ui_elements = analysis.get("ui_elements", [])
+            if ui_elements:
+                elements_str = ", ".join(ui_elements[:5])
+                vision_context += f"   • UI Elements: {elements_str}\n"
+
+            # Add context
+            context = analysis.get("context", "")
+            if context:
+                vision_context += f"   • Context: {context}\n"
+
+            # Add patterns
+            patterns = analysis.get("patterns", "")
+            if patterns:
+                vision_context += f"   • Patterns: {patterns}\n"
+
+            # Add insights
+            insights = analysis.get("insights", "")
+            if insights:
+                vision_context += f"   • Insights: {insights}\n"
+
+            events_added += 1
+            if event_id:
+                event_ids_to_mark.append(event_id)
+
+        # Mark all retrieved events as used in LLM
+        if event_ids_to_mark:
+            await vision_job_manager.mark_events_as_used(event_ids_to_mark)
+
+        print(f"\n   📊 Vision context summary:")
+        print(f"      - Total events retrieved: {len(vision_events)}")
+        print(f"      - Events added to context: {events_added}")
+        print(f"      - Events marked as used: {len(event_ids_to_mark)}")
+        print(f"      - Context length: {len(vision_context)} chars")
+        print(f"{'='*60}\n")
+
+        return vision_context
+
+    except Exception as e:
+        print(f"❌ Error fetching vision context: {e}")
+        import traceback
+        traceback.print_exc()
+        return ""
+
+
 async def build_batch_openai_prompt(request: BatchContextRequest, user_history: dict = None) -> str:
-    """Build sequence-aware OpenAI prompt with full context integration"""
+    """Build sequence-aware OpenAI prompt with full context integration (including vision)"""
 
     print(f"📦 Building batch prompt for {len(request.app_sequence)} apps")
 
@@ -833,6 +933,16 @@ async def build_batch_openai_prompt(request: BatchContextRequest, user_history: 
         else:
             print("⚠️ No meaningful context for enhanced analysis, skipping")
             sequence_context += f"\nContext analysis not available\n"
+
+    # Fetch and add vision context for the current app
+    vision_context = ""
+    if request.app_sequence and request.user_id:
+        latest_app = request.app_sequence[-1]
+        vision_context = await get_vision_context(
+            user_id=request.user_id,
+            app_name=latest_app.appName,
+            limit=3
+        )
 
     # Add comprehensive user history context
     history_context = ""
@@ -935,7 +1045,7 @@ async def build_batch_openai_prompt(request: BatchContextRequest, user_history: 
     prompt = f"""You are an AI assistant analyzing a detailed user workflow sequence to provide highly contextual suggestions.
 
 {sequence_context}
-
+{vision_context}
 {history_context}
 
 CONTEXT SIGNALS:
@@ -945,19 +1055,21 @@ CONTEXT SIGNALS:
 
 ANALYSIS INSTRUCTIONS:
 Analyze this complete workflow sequence using ALL available context:
-1. Screen content from each app in the sequence
-2. User's historical patterns and preferences
-3. Keystroke patterns and tool usage
-4. Knowledge graph insights about user expertise
-5. The progression and timing of app transitions
-6. Multi-level context analysis of current state
+1. Screen content from each app in the sequence (OCR text)
+2. **Vision insights** from screenshots (UI elements, visual context, patterns)
+3. User's historical patterns and preferences
+4. Keystroke patterns and tool usage
+5. Knowledge graph insights about user expertise
+6. The progression and timing of app transitions
+7. Multi-level context analysis of current state
 
 Provide 1-3 highly intelligent suggestions that:
 - Leverage the user's known expertise and patterns
 - Address the specific workflow sequence context
-- Consider all visible screen content across apps
+- **Consider both text content (OCR) and visual context (Vision insights)**
 - Help optimize or advance their current multi-app task
 - Are personalized to their demonstrated capabilities
+- Take into account the visual UI elements and patterns detected in screenshots
 
 Return JSON format:
 {{

@@ -2,12 +2,13 @@
 Vision API Router
 Handles app preferences and vision analysis requests
 """
-from fastapi import APIRouter, HTTPException, Body, File, UploadFile
+from fastapi import APIRouter, HTTPException, Body, File, UploadFile, Form
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
 from app.core.database import supabase
 from app.services.s3_service import s3_service
+from app.services.vision_job_manager import vision_job_manager
 
 router = APIRouter(prefix="/api/vision", tags=["vision"])
 
@@ -46,10 +47,17 @@ async def get_user_preferences(user_id: str):
     Get all app preferences for a user
     """
     try:
+        print(f"\n📋 [VisionRouter] GET USER PREFERENCES for user: {user_id}")
+
         result = supabase.table("user_app_preferences")\
             .select("*")\
             .eq("user_id", user_id)\
             .execute()
+
+        print(f"   Found {len(result.data) if result.data else 0} preferences")
+        if result.data:
+            for pref in result.data:
+                print(f"   - {pref.get('app_name')}: vision={pref.get('allow_vision')}, screenshots={pref.get('allow_screenshots')}")
 
         return result.data
     except Exception as e:
@@ -99,12 +107,21 @@ async def update_app_preference(
     Update or create preference for a specific app
     """
     try:
+        print(f"\n{'='*60}")
+        print(f"📝 [VisionRouter] UPDATE APP PREFERENCE")
+        print(f"   User ID: {user_id}")
+        print(f"   App: {app_name}")
+        print(f"   Updates: {updates.dict(exclude_none=True)}")
+        print(f"{'='*60}")
+
         # Check if preference exists
         existing = supabase.table("user_app_preferences")\
             .select("*")\
             .eq("user_id", user_id)\
             .eq("app_name", app_name)\
             .execute()
+
+        print(f"   Existing record: {'YES' if existing.data else 'NO'}")
 
         update_data = {
             k: v for k, v in updates.dict().items() if v is not None
@@ -131,24 +148,33 @@ async def update_app_preference(
                 if key not in update_data:
                     update_data[key] = value
 
+            print(f"   Creating new record with data: {update_data}")
+
             result = supabase.table("user_app_preferences")\
                 .insert(update_data)\
                 .execute()
 
             print(f"✅ Created preference for {app_name}")
+            print(f"   Database response: {result.data}")
         else:
             # Update existing preference
+            print(f"   Updating existing record with: {update_data}")
+
             result = supabase.table("user_app_preferences")\
                 .update(update_data)\
                 .eq("user_id", user_id)\
                 .eq("app_name", app_name)\
                 .execute()
 
-            print(f"✅ Updated preference for {app_name}: {update_data}")
+            print(f"✅ Updated preference for {app_name}")
+            print(f"   Database response: {result.data}")
 
+        print(f"{'='*60}\n")
         return {"success": True, "data": result.data[0] if result.data else None}
     except Exception as e:
         print(f"❌ Error updating preference for {app_name}: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -303,4 +329,132 @@ async def delete_screenshot(storage_path: str):
         return {"success": True, "message": "Screenshot deleted"}
     except Exception as e:
         print(f"❌ Error deleting screenshot: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Vision Job Endpoints
+
+@router.post("/jobs/{user_id}")
+async def create_vision_job(
+    user_id: str,
+    file: UploadFile = File(...),
+    app_name: str = Form(...),
+    session_id: str = Form(...),
+    allow_screenshots: bool = Form(False),
+    ocr_event_id: Optional[str] = Form(None)
+):
+    """
+    Create a new vision job from screenshot upload.
+
+    This endpoint:
+    1. Receives screenshot from Electron
+    2. Optionally uploads to S3 (if allow_screenshots=true)
+    3. Creates vision_events record with 'pending' status
+    4. Queues for vision API processing
+
+    Args:
+        user_id: User UUID
+        file: Screenshot file (PNG)
+        app_name: Application name
+        session_id: Session UUID
+        allow_screenshots: Whether to store screenshot in S3
+        ocr_event_id: Optional OCR event to link
+
+    Returns:
+        Vision job metadata
+    """
+    try:
+        # Validate file type
+        if file.content_type not in ["image/png", "image/jpeg", "image/jpg"]:
+            raise HTTPException(
+                status_code=400,
+                detail="Only PNG and JPEG images are supported"
+            )
+
+        # Read screenshot data
+        screenshot_data = await file.read()
+
+        # Create vision job
+        result = await vision_job_manager.create_vision_job(
+            user_id=user_id,
+            screenshot_data=screenshot_data,
+            app_name=app_name,
+            session_id=session_id,
+            allow_screenshots=allow_screenshots,
+            ocr_event_id=ocr_event_id
+        )
+
+        return {
+            "success": True,
+            "data": result
+        }
+
+    except Exception as e:
+        print(f"❌ Error creating vision job: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/jobs/{job_id}")
+async def get_vision_job_status(job_id: str):
+    """
+    Get status of a vision job.
+
+    Args:
+        job_id: Vision job ID
+
+    Returns:
+        Job status and metadata
+    """
+    try:
+        job = await vision_job_manager.get_job_status(job_id)
+
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        return {
+            "success": True,
+            "data": job
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error getting job status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/events/{user_id}/recent")
+async def get_recent_vision_events(
+    user_id: str,
+    limit: int = 5,
+    app_name: Optional[str] = None
+):
+    """
+    Get recent vision events for a user.
+
+    Used to fetch vision context for LLM suggestions.
+
+    Args:
+        user_id: User UUID
+        limit: Max events to return
+        app_name: Optional filter by app
+
+    Returns:
+        List of recent vision events
+    """
+    try:
+        events = await vision_job_manager.get_recent_vision_events(
+            user_id=user_id,
+            limit=limit,
+            app_name=app_name
+        )
+
+        return {
+            "success": True,
+            "data": events,
+            "count": len(events)
+        }
+
+    except Exception as e:
+        print(f"❌ Error getting recent vision events: {e}")
         raise HTTPException(status_code=500, detail=str(e))

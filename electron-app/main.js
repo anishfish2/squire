@@ -6,6 +6,7 @@ const ActiveAppTracker = require("./app-tracker");
 const ComprehensiveActivityTracker = require("./activity-tracker");
 const AIAssistant = require("./ai-assistant");
 const EfficientKeystrokeCollector = require("./keystroke-collector");
+const VisionScheduler = require("./vision-scheduler");
 
 let mainWindow;
 let debugWindow;
@@ -16,6 +17,7 @@ let appTracker;
 let activityTracker;
 let aiAssistant;
 let keystrokeCollector;
+let visionScheduler;
 let recentActivityData = null;
 let skipNextOCR = false;
 let smartOCRScheduler = null;
@@ -811,6 +813,10 @@ function setupPipelines() {
 
   activityTracker.ocrManager = ocrManager;
 
+  // Initialize VisionScheduler
+  visionScheduler = new VisionScheduler('http://127.0.0.1:8000', currentUserId, currentSessionId);
+  visionScheduler.startScheduling();
+
   appTracker = new ActiveAppTracker(ocrManager, async (appInfo) => {
     try {
       const SQUIRE_APP_IDENTIFIERS = [
@@ -847,6 +853,11 @@ function setupPipelines() {
             appName: appInfo.appName,
             allApps: Array.from(detectedApps)
           });
+        }
+
+        // Update VisionScheduler with current app
+        if (visionScheduler) {
+          visionScheduler.updateCurrentApp(appInfo.appName);
         }
       }
 
@@ -1047,6 +1058,10 @@ app.on("browser-window-created", (_, win) => {
 app.on("before-quit", () => {
   console.log("🛑 App shutting down, cleaning up...");
 
+  if (visionScheduler) {
+    visionScheduler.stopScheduling();
+  }
+
   if (keystrokeCollector) {
     keystrokeCollector.stopTracking();
   }
@@ -1153,6 +1168,11 @@ ipcMain.on("update-app-preference", async (event, { appName, updates }) => {
       // Update local cache
       appPreferences.set(appName, { ...appPreferences.get(appName), ...updates });
 
+      // Refresh VisionScheduler preferences for this app
+      if (visionScheduler) {
+        visionScheduler.refreshAppPreference(appName);
+      }
+
       event.reply("preference-updated", { appName, updates });
     } else {
       console.error(`Failed to update preference for ${appName}:`, response.status);
@@ -1164,6 +1184,9 @@ ipcMain.on("update-app-preference", async (event, { appName, updates }) => {
 
 ipcMain.on("toggle-global-vision", (event, enabled) => {
   console.log(`🔄 Global vision feature ${enabled ? 'enabled' : 'disabled'}`);
-  // This will be used by VisionScheduler later
+
+  if (visionScheduler) {
+    visionScheduler.setGlobalVisionEnabled(enabled);
+  }
 });
 

@@ -58,8 +58,18 @@ ipcRenderer.on('detected-apps', (event, apps) => {
 });
 
 ipcRenderer.on('app-preferences-loaded', (event, preferences) => {
-  console.log('Loaded app preferences:', preferences);
+  console.log('⚙️ [Settings] Loaded app preferences from database:', preferences.length, 'apps');
+  preferences.forEach(pref => {
+    console.log(`  - ${pref.app_name}: vision=${pref.allow_vision}, screenshots=${pref.allow_screenshots}`);
+  });
+
   appPreferences = preferences;
+
+  // Mark all apps from database as detected
+  preferences.forEach(pref => {
+    detectedApps.add(pref.app_name);
+  });
+
   renderAppList();
 });
 
@@ -131,14 +141,21 @@ function mergeWithPreferences() {
   detectedApps.forEach(appName => {
     const exists = appPreferences.find(p => p.app_name === appName);
     if (!exists) {
-      appPreferences.push({
+      console.log(`⚙️ Creating default preferences for new app: ${appName}`);
+
+      const newPref = {
         app_name: appName,
         allow_ocr: true,
         allow_vision: false,
         allow_screenshots: false,
         ocr_frequency: 'normal',
         vision_frequency: 'low'
-      });
+      };
+
+      appPreferences.push(newPref);
+
+      // IMPORTANT: Save to database immediately
+      updatePreference(appName, newPref);
     }
   });
 
@@ -278,6 +295,7 @@ function disableAllApps() {
 }
 
 function updatePreference(appName, updates) {
+  console.log(`⚙️ [Settings] Updating preference for ${appName}:`, updates);
   ipcRenderer.send('update-app-preference', { appName, updates });
 }
 
