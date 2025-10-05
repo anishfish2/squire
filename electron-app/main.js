@@ -448,6 +448,12 @@ function createSuggestionsWindow() {
     },
   });
 
+  suggestionsWindow.setBounds({ width: 400, height: 500, x: width - 420, y: 20 });
+  suggestionsWindow.setResizable(false);
+  suggestionsWindow.setMovable(true);
+  suggestionsWindow.setAlwaysOnTop(true, "screen-saver");
+
+
   suggestionsWindow.loadFile("suggestions.html");
 
   suggestionsWindow.webContents.openDevTools({ mode: 'detach' });

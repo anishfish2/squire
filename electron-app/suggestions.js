@@ -26,20 +26,9 @@ document.addEventListener('DOMContentLoaded', () => {
     aiSuggestionsElement: !!aiSuggestionsElement
   });
 
-  // CRITICAL: Start with click-through ENABLED (dot mode)
-  console.log('🔧 Initializing click-through: ENABLED (dot mode)');
-  ipcRenderer.send('suggestions-set-ignore-mouse-events', true, { forward: true });
-
-  // Add global mouse event listener for debugging
-  document.body.addEventListener('mouseenter', () => {
-    console.log('🌍 BODY mouseenter detected');
-  });
-  document.body.addEventListener('mousemove', (e) => {
-    // Only log occasionally to avoid spam
-    if (Math.random() < 0.01) {
-      console.log('🌍 BODY mousemove at', e.clientX, e.clientY);
-    }
-  });
+  // CRITICAL: Disable click-through entirely - window is always interactive
+  console.log('🔧 Disabling click-through - window is always interactive');
+  ipcRenderer.send('suggestions-set-ignore-mouse-events', false);
 
   console.log('TextBox element:', textBox);
   console.log('TextBox classes:', textBox?.className);
@@ -56,16 +45,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Add mouse enter/leave to dot and textBox to control click-through
   if (dot) {
-    dot.addEventListener('mouseenter', () => {
-      console.log('🔵 Dot mouseenter - clickable');
-      ipcRenderer.send('suggestions-set-ignore-mouse-events', false);
-    });
-
-    dot.addEventListener('mouseleave', () => {
-      console.log('🔵 Dot mouseleave - click-through enabled');
-      ipcRenderer.send('suggestions-set-ignore-mouse-events', true, { forward: true });
-    });
-
     dot.addEventListener('click', (e) => {
       console.log('🔵 Dot clicked!');
       e.stopPropagation();
@@ -76,42 +55,21 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   if (textBox) {
+ 
     textBox.addEventListener('mouseenter', () => {
-      console.log('📦 TextBox mouseenter - DISABLING click-through');
+      console.log('📦 TextBox mouseenter');
       isHovered = true;
-      ipcRenderer.send('suggestions-set-ignore-mouse-events', false);
-      console.log('   Sent IPC: suggestions-set-ignore-mouse-events = false');
-      resetIdleTimer();
-    });
-
-    textBox.addEventListener('mousemove', () => {
-      if (!isHovered) {
-        console.log('📦 TextBox mousemove but not hovered - re-disabling click-through');
-        isHovered = true;
-        ipcRenderer.send('suggestions-set-ignore-mouse-events', false);
-      }
-      resetIdleTimer();
+      pauseIdleTimer();
     });
 
     textBox.addEventListener('mouseleave', () => {
-      console.log('📦 TextBox mouseleave - ENABLING click-through');
+      console.log('📦 TextBox mouseleave');
       isHovered = false;
-      ipcRenderer.send('suggestions-set-ignore-mouse-events', true, { forward: true });
-      console.log('   Sent IPC: suggestions-set-ignore-mouse-events = true');
-      resetIdleTimer();
+      resumeIdleTimer();
     });
 
-    textBox.addEventListener('click', (e) => {
-      console.log('📦 TextBox CLICKED!', e.target);
+    textBox.addEventListener('click', () => {
       resetIdleTimer();
-    });
-
-    // Add explicit test to see if clicks are being received
-    textBox.addEventListener('mousedown', (e) => {
-      // Only log if NOT starting a drag
-      if (!e.target.closest('#ai-suggestions')) {
-        console.log('📦 TextBox MOUSEDOWN (drag area)', e.target);
-      }
     });
   }
   // Initialize drag listeners
@@ -141,41 +99,64 @@ function handleAISuggestions(textLines, appName, windowTitle, aiSuggestions = []
   }
 }
 
+
+
 function showDot() {
   console.log('🔴 showDot() called');
-  if (textBox && dot) {
-    // Hide textbox, show dot
-    textBox.style.display = 'none';
-    dot.style.display = 'flex';
+  if (!textBox || !dot) return;
 
-    // Enable click-through
-    ipcRenderer.send('suggestions-set-ignore-mouse-events', true, { forward: true });
+  // Fade out first
+  textBox.classList.remove('opacity-100', 'scale-100');
+  textBox.classList.add('opacity-0', 'scale-95', 'pointer-events-none');
+  textBox.style.visibility = 'hidden';
 
-    isExpanded = false;
-    console.log('  ✅ Dot visible, textbox hidden');
-  }
+  // Wait for transition to finish before hiding completely
+  setTimeout(() => {
+    textBox.classList.add('hidden'); // Tailwind: display:none
+    textBox.style.pointerEvents = 'none';
+
+    textBox.style.display = 'none'; // ensure inline display:none wins
+    console.log('  ✅ Textbox fully hidden after fade');
+  }, 400); // matches transition time
+
+  // Show the dot again
+  dot.classList.remove('hidden');
+  dot.classList.add('flex', 'opacity-100');
+  dot.style.display = 'flex';
+  isExpanded = false;
 }
+
+
+
+
 
 function showTextBox() {
   console.log('🟢 showTextBox() called');
-  if (textBox && dot) {
-    // Hide dot, show textbox
-    dot.style.display = 'none';
-    textBox.style.display = 'block';
-    textBox.style.visibility = 'visible';
-    textBox.style.opacity = '1';
-    textBox.style.transform = 'scale(1)';
-    textBox.classList.remove('hidden');
-    textBox.classList.add('visible');
+  if (!textBox || !dot) return;
 
-    // Disable click-through
-    ipcRenderer.send('suggestions-set-ignore-mouse-events', false);
+  // Show textbox, re-enable pointer events
+  textBox.classList.remove('hidden', 'opacity-0', 'scale-95', 'pointer-events-none');
 
-    isExpanded = true;
-    startIdleTimer();
-    console.log('  ✅ Textbox visible, dot hidden');
-  }
+  textBox.classList.add('opacity-100', 'scale-100');
+  textBox.style.pointerEvents = 'auto';
+
+  textBox.style.display = 'block';
+  textBox.style.visibility = 'visible';
+
+  // Hide dot
+  dot.classList.add('hidden');
+  dot.style.display = 'none';
+
+  isExpanded = true;
+  startIdleTimer();
+
+  // Ensure interactivity restored
+  ipcRenderer.send('suggestions-set-ignore-mouse-events', false);
+
+  console.log('  ✅ Textbox visible, dot hidden');
 }
+
+
 
 
 function updateSuggestionsDisplay(textLines, aiSuggestions = [], appName = '') {
@@ -201,8 +182,9 @@ function updateSuggestionsDisplay(textLines, aiSuggestions = [], appName = '') {
       suggestionDiv.innerHTML = `
         <div class="short-view cursor-pointer rounded-lg p-2 -m-2 transition-all"
              style="background: rgba(59, 130, 246, 0.15); border: 2px solid rgba(96, 165, 250, 0.4);"
-             onmouseenter="this.style.background='rgba(59, 130, 246, 0.25)'"
-             onmouseleave="this.style.background='rgba(59, 130, 246, 0.15)'"
+             onmouseenter="console.log('INLINE mouseenter'); this.style.background='rgba(59, 130, 246, 0.25)'"
+             onmouseleave="console.log('INLINE mouseleave'); this.style.background='rgba(59, 130, 246, 0.15)'"
+             <!-- onclick="console.log('INLINE CLICK!'); window.toggleSuggestion(${index})" -->
              data-index="${index}">
           <div class="flex items-center justify-between gap-3">
             <p class="text-[13px] text-white/95 leading-relaxed flex-1 font-medium">${shortDesc}</p>
@@ -290,6 +272,9 @@ function updateSuggestionsDisplay(textLines, aiSuggestions = [], appName = '') {
 }
 
 
+
+let idleTimeoutMs = 5000;
+
 function startIdleTimer() {
   clearTimeout(idleTimer);
   idleTimer = setTimeout(() => {
@@ -298,15 +283,20 @@ function startIdleTimer() {
       console.log('  Hiding due to idle timeout');
       showDot();
     }
-  }, 5000);
+  }, idleTimeoutMs);
 }
 
-function resetIdleTimer() {
-  console.log('🔄 Reset idle timer. isExpanded:', isExpanded);
-  if (isExpanded) {
-    startIdleTimer();
-  }
+function pauseIdleTimer() {
+  clearTimeout(idleTimer);
+  idleTimer = null;
+  console.log('⏸️ Idle timer paused');
 }
+
+function resumeIdleTimer() {
+  console.log('▶️ Idle timer resumed');
+  startIdleTimer();
+}
+
 
 
 // Toggle suggestion expansion
@@ -355,35 +345,41 @@ let dragState = {
   clickStartPos: { x: 0, y: 0 }
 };
 
+
 function onBoxMouseDown(e) {
   console.log('📦 Box mousedown:', e.target);
   console.log('  Target element:', e.target.tagName, e.target.className);
   console.log('  Closest ai-suggestions:', e.target.closest('#ai-suggestions'));
 
-  // Don't start dragging if clicking on suggestions or interactive elements
+  // 🧩 Allow clicking inside the suggestions area (do NOT block)
   if (e.target.closest('#ai-suggestions')) {
-    console.log('  ⛔ Ignoring mousedown - inside suggestions area, allowing click');
-    return; // Allow all interaction with suggestions
+    console.log('💬 Inside suggestions — skip dragging but allow clicks');
+    dragState.isDragging = false;
+    return; // Don’t start drag
   }
+
+  // 🧩 Allow clicking buttons freely
   if (e.target.tagName === 'BUTTON' || e.target.closest('button')) {
-    console.log('  ⛔ Ignoring mousedown - on button');
+    console.log('💬 Click on button — allow interaction');
+    dragState.isDragging = false;
     return;
   }
-  console.log('  ✅ Starting drag');
 
+  console.log('  ✅ Starting drag');
   dragState.isDragging = true;
   dragState.startX = e.screenX;
   dragState.startY = e.screenY;
   dragState.clickStartTime = Date.now();
   dragState.clickStartPos = { x: e.screenX, y: e.screenY };
 
-  // Get the actual screen position of the window
+  // Get actual screen position of the window
   dragState.startBoxX = e.screenX - e.clientX;
   dragState.startBoxY = e.screenY - e.clientY;
 
   e.preventDefault();
   e.stopPropagation();
 }
+
 
 function onDotMouseDown(e) {
   dragState.isDragging = true;
