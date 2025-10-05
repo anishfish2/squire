@@ -213,10 +213,8 @@ class OCRJobManager:
             }
 
             supabase.table("ocr_events").update(completion_data).eq("id", job_id).execute()
-            print(f"💾 OCR results saved to database")
 
             await self._emit_job_completion_websocket(job, text_lines, extracted_entities, meaningful_context)
-            print(f"📡 OCR results sent via websocket")
 
             # Update job dict with completion data for post-processing
             job.update(completion_data)
@@ -363,9 +361,9 @@ class OCRJobManager:
             content_for_analysis = meaningful_context if meaningful_context else '\n'.join(ocr_text[:50])
 
             if meaningful_context:
-                print(f"🧠 Processing meaningful context for knowledge graph")
+                pass
             else:
-                print(f"🧠 Processing raw OCR for knowledge graph: {len(ocr_text)} lines")
+                pass
 
             client = get_openai_client()
             if not client:
@@ -437,8 +435,6 @@ Only include insights with confidence > 0.6. Return empty arrays if no clear ins
                 result_text = result_text.strip()
 
                 insights = json.loads(result_text)
-                print(f"✅ Knowledge graph insights extracted from OCR")
-                print(f"📊 Insights: {json.dumps(insights, indent=2)}")
 
                 node_type_mapping = {
                     "habits": "habit",
@@ -453,7 +449,6 @@ Only include insights with confidence > 0.6. Return empty arrays if no clear ins
 
                 for category, node_type in node_type_mapping.items():
                     items = insights.get(category, [])
-                    print(f"🔍 Processing {category}: {len(items)} items")
                     for item in items[:2]:
                         try:
                             confidence = item.get("confidence", 0.7)
@@ -498,10 +493,7 @@ Only include insights with confidence > 0.6. Return empty arrays if no clear ins
                                 "description": content_data["description"]
                             })
 
-                            print(f"✅ Created {node_type} node: {content_data['description'][:50]}...")
-
                         except Exception as e:
-                            print(f"❌ Failed to create {node_type} node: {e}")
                             import traceback
                             traceback.print_exc()
 

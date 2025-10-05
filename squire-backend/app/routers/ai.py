@@ -126,14 +126,14 @@ class SuggestionsResponse(BaseModel):
 
 
 async def extract_meaningful_context(ocr_lines: List[str], app_name: str, window_title: str = "") -> str:
-    """Extract a meaningful summary from OCR content"""
+    """Extract a meaningful summary from OCR content with specific details"""
     client = get_openai_client()
     if not ocr_lines or not client or len(ocr_lines) == 0:
         return ""
 
     content = '\n'.join(ocr_lines[:50])
 
-    prompt = f"""Summarize this screen content in 2-3 sentences. Focus on what the user is doing.
+    prompt = f"""Analyze this screen content and provide a DETAILED summary with SPECIFIC information.
 
 APP: {app_name}
 WINDOW: {window_title}
@@ -141,14 +141,22 @@ WINDOW: {window_title}
 CONTENT:
 {content}
 
-Provide a brief, natural summary."""
+INSTRUCTIONS:
+- Extract and mention SPECIFIC details: file names, function names, error messages, URLs, variable names, numbers, dates
+- Note any ERROR messages or WARNING text verbatim
+- Identify specific UI elements: button labels, menu items, field names
+- Mention specific text that appears (don't just say "code" - mention function/class names)
+- Include specific numbers, metrics, or values visible
+- Note any identifiable patterns or repeated elements
+
+Provide a detailed 3-4 sentence summary with concrete specifics."""
 
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=150
+            temperature=0.2,
+            max_tokens=250
         )
 
         result = response.choices[0].message.content.strip()
@@ -785,31 +793,47 @@ async def get_vision_context(user_id: str, app_name: Optional[str] = None, limit
 
             vision_context += f"\n{i}. {event_app} (at {event_time}):\n"
 
-            # Add task/activity
+            # Add task/activity with more detail
             task = analysis.get("task", "")
             if task:
-                vision_context += f"   • Task: {task}\n"
+                vision_context += f"   • Task/Activity: {task}\n"
 
-            # Add UI elements (limit to 5)
+            # Add ALL UI elements (don't limit - we need specifics)
             ui_elements = analysis.get("ui_elements", [])
             if ui_elements:
-                elements_str = ", ".join(ui_elements[:5])
-                vision_context += f"   • UI Elements: {elements_str}\n"
+                elements_str = ", ".join(ui_elements)
+                vision_context += f"   • Visible UI Elements: {elements_str}\n"
 
-            # Add context
+            # Add visible text
+            visible_text = analysis.get("visible_text", [])
+            if visible_text:
+                text_str = ", ".join(visible_text[:10])  # First 10 text items
+                vision_context += f"   • Visible Text/Labels: {text_str}\n"
+
+            # Add context with emphasis on specifics
             context = analysis.get("context", "")
             if context:
-                vision_context += f"   • Context: {context}\n"
+                vision_context += f"   • Visual Context: {context}\n"
 
             # Add patterns
             patterns = analysis.get("patterns", "")
             if patterns:
-                vision_context += f"   • Patterns: {patterns}\n"
+                vision_context += f"   • Detected Patterns: {patterns}\n"
 
             # Add insights
             insights = analysis.get("insights", "")
             if insights:
-                vision_context += f"   • Insights: {insights}\n"
+                vision_context += f"   • AI Insights: {insights}\n"
+
+            # Add any error indicators from vision
+            errors = analysis.get("errors_detected", [])
+            if errors:
+                vision_context += f"   • ⚠️ Errors/Warnings Visible: {', '.join(errors)}\n"
+
+            # Add specific screen state details
+            screen_state = analysis.get("screen_state", "")
+            if screen_state:
+                vision_context += f"   • Screen State: {screen_state}\n"
 
             events_added += 1
             if event_id:
@@ -1036,22 +1060,28 @@ CONTEXT SIGNALS:
 
 ANALYSIS INSTRUCTIONS:
 Analyze this complete workflow sequence using ALL available context:
-1. Screen content from each app in the sequence (OCR text)
-2. **Vision insights** from screenshots (UI elements, visual context, patterns)
-3. User's historical patterns and preferences
-4. Keystroke patterns and tool usage
-5. Knowledge graph insights about user expertise
-6. The progression and timing of app transitions
-7. Multi-level context analysis of current state
+1. Screen content from each app in the sequence (OCR text) - Note specific text, file names, error messages, URLs, function names, variable names, etc.
+2. **Vision insights** from screenshots (UI elements, visual context, patterns) - Note specific UI states, button text, menu items, color schemes, layout patterns
+3. User's historical patterns and preferences - Reference SPECIFIC past behaviors, tools used, proficiency levels
+4. Keystroke patterns and tool usage - Note CONCRETE efficiency metrics and repetitive patterns
+5. Knowledge graph insights about user expertise - Cite SPECIFIC skills and proficiency levels
+6. The progression and timing of app transitions - Note EXACT sequences and durations
+7. Multi-level context analysis of current state - Reference SPECIFIC activities and goals
 
-Provide ONLY 1 highly intelligent, high-quality suggestion that:
-- Leverages the user's known expertise and patterns
-- Addresses the specific workflow sequence context
-- **Considers both text content (OCR) and visual context (Vision insights)**
-- Helps optimize or advance their current multi-app task
-- Is personalized to their demonstrated capabilities
-- Takes into account the visual UI elements and patterns detected in screenshots
-- Is truly valuable and actionable (quality over quantity)
+CRITICAL REQUIREMENTS:
+Provide ONLY 1 highly intelligent, NON-OBVIOUS suggestion that:
+- **MUST be grounded in CONCRETE data from the context above** (cite specific OCR text, vision elements, historical patterns, or user proficiency)
+- **AVOID generic/obvious advice** like "take breaks", "organize files", "use keyboard shortcuts" unless you can cite SPECIFIC evidence of inefficiency
+- **Leverage SPECIFIC expertise from user history** (e.g., "Given your expert-level Python proficiency and your current TypeError in line 45...")
+- **Reference CONCRETE visual or textual evidence** (e.g., "Your screenshot shows 12 browser tabs open with Stack Overflow, suggesting...")
+- **Be hyper-specific to THIS moment** using actual data points from OCR, vision, or history
+- **Demonstrate deep pattern analysis** - connect dots between multiple context sources
+- Is personalized using ACTUAL demonstrated capabilities from knowledge graph
+- Provides ACTIONABLE steps with specific tool names, shortcuts, or workflows the user ACTUALLY uses
+
+If you cannot provide a suggestion grounded in CONCRETE, SPECIFIC data from the context, return empty suggestions array.
+
+**QUALITY OVER QUANTITY**: Return NOTHING rather than generic advice. Your suggestion must cite at least 2-3 concrete data points from the context above (specific OCR text, vision elements, historical metrics, or skill proficiency levels).
 
 Return JSON format:
 {{
@@ -1059,14 +1089,25 @@ Return JSON format:
     {{
       "type": "workflow_optimization|task_completion|context_switch|productivity|knowledge_application",
       "title": "Specific actionable suggestion based on full context",
-      "description": "Detailed explanation leveraging user history and sequence analysis",
+      "content": {{
+        "short_description": "One concise sentence (max 80 chars) summarizing the suggestion",
+        "description": "Detailed explanation leveraging user history and sequence analysis",
+        "action_steps": ["High-level step 1", "High-level step 2", "High-level step 3"],
+        "expected_benefit": "What this will achieve for the user",
+        "difficulty": "easy|medium|hard",
+        "time_investment": "X minutes",
+        "requires_detailed_guide": true,
+        "tools_needed": ["App/tool name 1", "App/tool name 2"],
+        "platforms": ["macOS", "Windows", "web"]
+      }},
       "confidence": 0.8,
-      "workflow_context": "Why this fits their demonstrated patterns and current sequence",
       "priority": "high|medium|low",
-      "triggers": ["Specific content or patterns that triggered this suggestion"],
-      "relevant_apps": ["{request.app_sequence[0].appName if request.app_sequence else 'unknown'}"],
-      "time_sensitive": true/false,
-      "personalization_factors": ["User expertise/patterns that informed this suggestion"]
+      "context_data": {{
+        "triggers": ["Specific content or patterns that triggered this suggestion"],
+        "relevant_apps": ["{request.app_sequence[0].appName if request.app_sequence else 'unknown'}"],
+        "time_sensitive": true/false,
+        "personalization_factors": ["User expertise/patterns that informed this suggestion"]
+      }}
     }}
   ]
 }}
@@ -1768,30 +1809,37 @@ async def process_batch_context(request: BatchContextRequest):
         result = json.loads(response.choices[0].message.content)
         raw_suggestions = result.get("suggestions", [])
 
+        print(f"💡 LLM SUGGESTION RESPONSE: {json.dumps(raw_suggestions, indent=2)}")
+
 
         # Transform suggestions to match frontend expected format
         suggestions = []
         for sug in raw_suggestions:
+            # Get the content object from LLM response
+            llm_content = sug.get("content", {})
+
             transformed = {
                 "type": sug.get("type", "general"),
                 "title": sug.get("title", ""),
                 "content": {
-                    "description": sug.get("description", ""),
-                    "expected_benefit": sug.get("workflow_context", ""),
-                    "difficulty": "medium",  # Default, can be enhanced later
-                    "time_investment": "5-15 minutes",  # Default, can be enhanced later
-                    "platforms": sug.get("relevant_apps", []),
-                    "tools_needed": sug.get("relevant_apps", []),
-                    "action_steps": [
-                        f"Review the context: {sug.get('workflow_context', '')}",
-                        f"Apply this suggestion in: {', '.join(sug.get('relevant_apps', []))}",
-                        "Monitor the results and adjust as needed"
-                    ],
-                    "requires_detailed_guide": False
+                    "short_description": llm_content.get("short_description", sug.get("title", "")),
+                    "description": llm_content.get("description", sug.get("description", "")),
+                    "expected_benefit": llm_content.get("expected_benefit", ""),
+                    "difficulty": llm_content.get("difficulty", "medium"),
+                    "time_investment": llm_content.get("time_investment", "5-15 minutes"),
+                    "platforms": llm_content.get("platforms", []),
+                    "tools_needed": llm_content.get("tools_needed", []),
+                    "action_steps": llm_content.get("action_steps", []),
+                    "requires_detailed_guide": llm_content.get("requires_detailed_guide", False)
                 },
-                "confidence": sug.get("confidence", 0.7),
+                "confidence_score": sug.get("confidence", 0.7),
                 "priority": sug.get("priority", "medium"),
-                "time_sensitive": sug.get("time_sensitive", False)
+                "context_data": sug.get("context_data", {
+                    "triggers": sug.get("triggers", []),
+                    "relevant_apps": sug.get("relevant_apps", []),
+                    "time_sensitive": sug.get("time_sensitive", False),
+                    "personalization_factors": sug.get("personalization_factors", [])
+                })
             }
             suggestions.append(transformed)
 
