@@ -478,6 +478,13 @@ class AIAssistant {
   }
 
   async processBatchRequest(batchRequest) {
+    console.log("\n" + "="*80);
+    console.log("🔄 PROCESSING BATCH REQUEST");
+    console.log("="*80);
+    console.log(`Sequence ID: ${batchRequest.sequence_metadata.sequence_id}`);
+    console.log(`Apps: ${batchRequest.app_sequence.map(a => a.appName).join(' → ')}`);
+    console.log(`Pattern: ${batchRequest.sequence_metadata.workflow_pattern}`);
+    console.log("="*80 + "\n");
 
     try {
       const response = await this.makeHttpRequest(`${this.backendUrl}/api/ai/batch-context`, {
@@ -547,7 +554,10 @@ class AIAssistant {
         body: JSON.stringify(requestData)
       });
 
+      console.log(`✅ Saved data and received ${response.suggestions?.length || 0} AI suggestions from backend`);
+      console.log(`📊 Session ID: ${response.session_id}, OCR Event ID: ${response.ocr_event_id}`);
       if (response.suggestions && response.suggestions.length > 0) {
+        console.log('📋 Suggestions:', response.suggestions.map(s => `${s.type}: ${s.title}`));
       }
 
       const suggestions = response.suggestions || [];

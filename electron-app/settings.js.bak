@@ -52,20 +52,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // IPC Listeners
 ipcRenderer.on('detected-apps', (event, apps) => {
+  console.log('⚙️ [Settings] Received detected apps:', apps.length, 'apps');
   detectedApps = new Set(apps);
   detectedAppsLoaded = true;
 
   // Only merge if preferences are already loaded
   if (preferencesLoaded) {
+    console.log('⚙️ [Settings] Merging detected apps with preferences...');
     mergeWithPreferences();
   } else {
+    console.log('⚠️ [Settings] Preferences not loaded yet, skipping merge');
   }
 
   renderAppList();
 });
 
 ipcRenderer.on('app-preferences-loaded', (event, preferences) => {
+  console.log('⚙️ [Settings] Loaded app preferences from database:', preferences.length, 'apps');
   preferences.forEach(pref => {
+    console.log(`  - ${pref.app_name}: vision=${pref.allow_vision}, screenshots=${pref.allow_screenshots}`);
   });
 
   appPreferences = preferences;
@@ -76,6 +81,7 @@ ipcRenderer.on('app-preferences-loaded', (event, preferences) => {
     detectedApps.add(pref.app_name);
   });
 
+  console.log('⚙️ [Settings] Preferences loaded, now requesting detected apps...');
 
   // Now request detected apps (ensures preferences are loaded first)
   requestDetectedApps();
@@ -85,12 +91,14 @@ ipcRenderer.on('app-preferences-loaded', (event, preferences) => {
 });
 
 ipcRenderer.on('preference-updated', (event, { appName, updates }) => {
+  console.log('⚙️ [Settings] Preference updated from backend:', appName, updates);
   updateLocalPreference(appName, updates);
   renderAppList();
   updateStats();
 });
 
 ipcRenderer.on('app-detected', (event, { appName, allApps }) => {
+  console.log('⚙️ [Settings] New app detected:', appName);
 
   // Update detected apps set
   detectedApps = new Set(allApps);
@@ -98,6 +106,7 @@ ipcRenderer.on('app-detected', (event, { appName, allApps }) => {
   // Check if this app already has preferences
   const exists = appPreferences.find(p => p.app_name === appName);
   if (!exists && preferencesLoaded) {
+    console.log(`⚙️ [Settings] Adding new app "${appName}" to preferences`);
 
     // Add with defaults locally
     const newPref = {
@@ -121,7 +130,9 @@ ipcRenderer.on('app-detected', (event, { appName, allApps }) => {
     renderAppList();
     updateLastUpdated();
   } else if (exists) {
+    console.log(`⚙️ [Settings] App "${appName}" already in preferences, skipping`);
   } else {
+    console.log(`⚠️ [Settings] Preferences not loaded yet, skipping app "${appName}"`);
   }
 });
 
@@ -155,6 +166,7 @@ function mergeWithPreferences() {
   detectedApps.forEach(appName => {
     const exists = appPreferences.find(p => p.app_name === appName);
     if (!exists) {
+      console.log(`⚙️ [Settings] Creating default preferences for new app: ${appName}`);
 
       const newPref = {
         app_name: appName,
@@ -174,6 +186,7 @@ function mergeWithPreferences() {
   });
 
   if (newAppsAdded > 0) {
+    console.log(`⚙️ [Settings] Added ${newAppsAdded} new app(s) to preferences`);
   }
 
   // Sort alphabetically
@@ -312,6 +325,7 @@ function disableAllApps() {
 }
 
 function updatePreference(appName, updates) {
+  console.log(`⚙️ [Settings] Updating preference for ${appName}:`, updates);
   ipcRenderer.send('update-app-preference', { appName, updates });
 }
 

@@ -431,6 +431,7 @@ class ComprehensiveActivityTracker {
       });
 
       if (response.ok) {
+        console.log("📈 Successfully sent session stats to backend");
       } else {
         console.error(
           `❌ Failed to send session stats: ${response.status} ${response.statusText}`

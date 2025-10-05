@@ -10,7 +10,7 @@ let idleTimer;
 let isDragging = false;
 
 // DOM elements
-let dot, textBox, aiSuggestionsElement;
+let dot, textBox, ocrResults;
 
 // Wait for DOM to load
 document.addEventListener('DOMContentLoaded', () => {
@@ -24,7 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Get UI elements
   dot = document.getElementById('dot');
   textBox = document.getElementById('text-box');
-  aiSuggestionsElement = document.getElementById('ai-suggestions');
+  ocrResults = document.getElementById('ocr-results');
 
   // Initialize debug display
   updateDebugStatus('Waiting for app switch...');
@@ -42,9 +42,10 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('mouseup', onMouseUp);
 });
 
-// Listen for AI suggestions from main process
-ipcRenderer.on('ai-suggestions', (event, data) => {
-  handleAISuggestions(data.textLines, data.appName, data.windowTitle, data.aiSuggestions);
+// Listen for OCR results from main process
+ipcRenderer.on('ocr-results', (event, data) => {
+  console.log('Received OCR results:', data);
+  handleOCRResults(data.textLines, data.appName, data.windowTitle, data.aiSuggestions);
 });
 
 // Listen for debug updates from main process
@@ -57,12 +58,15 @@ ipcRenderer.on('toggle-debug-panel', () => {
   toggleDebugPanel();
 });
 
-function handleAISuggestions(textLines, appName, windowTitle, aiSuggestions = []) {
+function handleOCRResults(textLines, appName, windowTitle, aiSuggestions = []) {
+  console.log(`OCR for ${appName}: ${textLines.length} lines detected`);
 
   if (aiSuggestions && aiSuggestions.length > 0) {
-    updateSuggestionsDisplay(textLines, aiSuggestions, appName);
+    console.log(`🤖 Received ${aiSuggestions.length} AI suggestions:`, aiSuggestions);
+    updateOCRText(textLines, aiSuggestions, appName);
     showTextBox();
   } else {
+    console.log(`No suggestions received - keeping UI as dot`);
     showDot();
   }
 }
@@ -82,14 +86,15 @@ function showTextBox() {
   startIdleTimer();
 }
 
-function updateSuggestionsDisplay(textLines, aiSuggestions = [], appName = '') {
-  aiSuggestionsElement.innerHTML = '';
+function updateOCRText(textLines, aiSuggestions = [], appName = '') {
+  ocrResults.innerHTML = '';
 
   if (aiSuggestions && aiSuggestions.length > 0) {
     aiSuggestions.forEach((suggestion, index) => {
       const suggestionDiv = document.createElement('div');
       suggestionDiv.className = 'plain-suggestion';
       suggestionDiv.onclick = () => {
+        console.log('Clicked suggestion:', suggestion.title);
       };
 
       const needsGuide = suggestion.content.requires_detailed_guide;
@@ -102,7 +107,7 @@ function updateSuggestionsDisplay(textLines, aiSuggestions = [], appName = '') {
         ${guideButton}
         <div class="detailed-guide hidden" id="guide-${index}"></div>
       `;
-      aiSuggestionsElement.appendChild(suggestionDiv);
+      ocrResults.appendChild(suggestionDiv);
     });
   }
 }
@@ -149,13 +154,14 @@ dot.addEventListener('mouseleave', () => {
 
 dot.addEventListener('click', (e) => {
   e.stopPropagation();
-  if (aiSuggestionsElement.innerHTML.trim()) {
+  if (ocrResults.innerHTML.trim()) {
     showTextBox();
   }
 });
 
 // Function to show detailed implementation guide
 async function showDetailedGuide(button, suggestion) {
+  console.log('Requesting detailed guide for:', suggestion.title);
 
   const guideContainer = button.parentElement.querySelector('.detailed-guide');
 

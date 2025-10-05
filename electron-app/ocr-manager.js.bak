@@ -19,11 +19,13 @@ class OCRManager {
 
     this._setupWebSocketHandlers();
 
+    console.log('🔌 OCR Manager initialized with WebSocket support');
   }
 
   _setupWebSocketHandlers() {
     this.wsManager.onOCRJobComplete((data) => {
       const jobId = data.job_id;
+      console.log(`🎉 OCR job completed via WebSocket: ${jobId}`);
 
       if (this.pendingJobs.has(jobId)) {
         const { resolve, timeout } = this.pendingJobs.get(jobId);
@@ -38,6 +40,7 @@ class OCRManager {
     });
 
     this.wsManager.onError((error) => {
+      console.log('❌ WebSocket error in OCR Manager:', error);
     });
   }
 
@@ -45,8 +48,10 @@ class OCRManager {
     try {
       this.userId = userId;
       await this.wsManager.connect(userId, sessionId);
+      console.log('✅ OCR Manager WebSocket connected');
       return true;
     } catch (error) {
+      console.log('❌ Failed to connect OCR Manager WebSocket:', error);
       return false;
     }
   }
@@ -68,6 +73,7 @@ class OCRManager {
       }
 
       const imgBuffer = await screenshot({ format: 'png' });
+      console.log("Screenshot buffer length:", imgBuffer.length);
       if (imgBuffer.length === 0) {
         console.warn("⚠️ Screenshot buffer is empty!");
       }
@@ -80,6 +86,7 @@ class OCRManager {
       const jobId = await this.queueOCRJob(imgBuffer, appContext, userId);
 
       if (jobId) {
+        console.log(`📋 OCR job queued: ${jobId}`);
 
         const result = await this.waitForJobCompletionWebSocket(jobId);
         const textLines = result.text_lines || [];
@@ -89,6 +96,7 @@ class OCRManager {
 
         return textLines;
       } else {
+        console.log('❌ Failed to queue OCR job');
         return [];
       }
 
@@ -130,8 +138,10 @@ class OCRManager {
       const jobId = await this.queueOCRJob(imgBuffer, appContext, userId);
 
       if (jobId) {
+        console.log(`📋 OCR job queued: ${jobId}`);
         return jobId;
       } else {
+        console.log('❌ Failed to queue OCR job');
         return null;
       }
 
@@ -190,11 +200,13 @@ class OCRManager {
       this.pendingJobs.set(jobId, { resolve, reject, timeout });
 
       if (!this.wsManager.connected) {
+        console.log('⚠️ WebSocket not connected, falling back to polling for job', jobId);
 
         clearTimeout(timeout);
         this.pendingJobs.delete(jobId);
         this.waitForJobCompletionPolling(jobId, maxWaitTime).then(resolve).catch(reject);
       } else {
+        console.log(`✅ WebSocket connected, waiting for job completion via WebSocket for job ${jobId}`);
       }
     });
   }
@@ -357,6 +369,7 @@ class OCRManager {
   }
 
   async terminate() {
+    console.log('🛑 Terminating OCR Manager...');
 
     for (const [jobId, { timeout }] of this.pendingJobs) {
       clearTimeout(timeout);
@@ -367,6 +380,7 @@ class OCRManager {
       this.wsManager.disconnect();
     }
 
+    console.log('✅ OCR Manager terminated');
   }
 }
 

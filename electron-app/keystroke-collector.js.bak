@@ -22,11 +22,13 @@ class EfficientKeystrokeCollector {
 
     this.activeModifiers = new Set();
 
+    console.log('🎹 EfficientKeystrokeCollector initialized');
   }
 
 
   startTracking() {
     if (this.isTracking) {
+      console.log('⚠️ Keystroke tracking already started');
       return;
     }
 
@@ -34,6 +36,7 @@ class EfficientKeystrokeCollector {
 
     try {
       this.registerKeystrokeListeners();
+      console.log('✅ Keystroke tracking started');
     } catch (error) {
       this.isTracking = false;
       console.error('❌ Failed to start keystroke tracking:', error);
@@ -48,6 +51,7 @@ class EfficientKeystrokeCollector {
     this.clearTimers();
     this.unregisterKeystrokeListeners();
     this.isTracking = false;
+    console.log('🛑 Keystroke tracking stopped');
   }
 
   registerKeystrokeListeners() {
@@ -66,6 +70,7 @@ class EfficientKeystrokeCollector {
       }
 
       this.keyboardListener = new GlobalKeyboardListener();
+      console.log("🎹 Setting up real keystroke monitoring (non-blocking)");
 
       this.lastPhysicalByScan = new Map();
       this.lastPhysicalByKey = new Map();
@@ -129,6 +134,7 @@ class EfficientKeystrokeCollector {
         this.captureKeystroke(key, currentModifiers, now, state);
       });
 
+      console.log("✅ Real keystroke monitoring enabled");
     } catch (error) {
       console.error("❌ Failed to setup real keystroke monitoring:", error);
     }
@@ -199,6 +205,7 @@ class EfficientKeystrokeCollector {
       return;
     }
 
+    console.log(`📤 Flushing keystroke buffer: ${this.buffer.length} keystrokes (reason: ${reason})`);
 
     const compressedSequence = this.compressSequence(this.buffer);
 
@@ -517,6 +524,7 @@ class EfficientKeystrokeCollector {
       try {
         this.keyboardListener.kill();
         this.keyboardListener = null;
+        console.log('🔌 Keyboard listener destroyed');
       } catch (error) {
         console.error('❌ Error destroying keyboard listener:', error);
       }
@@ -530,10 +538,12 @@ class EfficientKeystrokeCollector {
 
   pause() {
     this.isTracking = false;
+    console.log('⏸️ Keystroke tracking paused');
   }
 
   resume() {
     this.isTracking = true;
+    console.log('▶️ Keystroke tracking resumed');
   }
 
   getBufferStatus() {

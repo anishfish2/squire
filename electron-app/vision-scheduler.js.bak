@@ -19,12 +19,14 @@ class VisionScheduler {
       'high': 30000      // 30 seconds
     };
 
+    console.log('📸 VisionScheduler initialized');
   }
 
   /**
    * Start vision capture scheduling
    */
   async startScheduling() {
+    console.log('📸 Starting vision scheduling...');
 
     // Load app preferences from backend
     await this.loadAppPreferences();
@@ -37,6 +39,7 @@ class VisionScheduler {
    * Stop vision capture scheduling
    */
   stopScheduling() {
+    console.log('📸 Stopping vision scheduling...');
 
     if (this.captureInterval) {
       clearTimeout(this.captureInterval);
@@ -51,6 +54,7 @@ class VisionScheduler {
    */
   updateCurrentApp(appName) {
     if (this.currentApp !== appName) {
+      console.log(`📸 App changed: ${this.currentApp} → ${appName}`);
       this.currentApp = appName;
 
       // Reschedule based on new app's preferences
@@ -62,6 +66,7 @@ class VisionScheduler {
    * Set global vision feature toggle
    */
   setGlobalVisionEnabled(enabled) {
+    console.log(`📸 Global vision ${enabled ? 'enabled' : 'disabled'}`);
     this.globalVisionEnabled = enabled;
 
     if (!enabled && this.captureInterval) {
@@ -76,6 +81,7 @@ class VisionScheduler {
    */
   async loadAppPreferences() {
     try {
+      console.log(`📸 [VisionScheduler] Loading app preferences from backend...`);
       const response = await fetch(`${this.backendUrl}/api/vision/preferences/${this.userId}`);
 
       if (response.ok) {
@@ -87,7 +93,9 @@ class VisionScheduler {
           this.appPreferences.set(pref.app_name, pref);
         });
 
+        console.log(`📸 [VisionScheduler] ✅ Loaded preferences for ${prefs.length} apps:`);
         prefs.forEach(pref => {
+          console.log(`   - ${pref.app_name}: vision=${pref.allow_vision}, screenshots=${pref.allow_screenshots}`);
         });
       } else {
         console.error('📸 [VisionScheduler] ❌ Failed to load app preferences:', response.status);
@@ -102,6 +110,7 @@ class VisionScheduler {
    */
   async refreshAppPreference(appName) {
     try {
+      console.log(`📸 [VisionScheduler] Refreshing preference for "${appName}"...`);
       const response = await fetch(`${this.backendUrl}/api/vision/preferences/${this.userId}`);
 
       if (response.ok) {
@@ -110,12 +119,15 @@ class VisionScheduler {
 
         if (pref) {
           this.appPreferences.set(appName, pref);
+          console.log(`📸 [VisionScheduler] ✅ Refreshed preference for "${appName}": vision=${pref.allow_vision}, screenshots=${pref.allow_screenshots}`);
 
           // If this is the current app, reschedule based on new settings
           if (this.currentApp === appName) {
+            console.log(`📸 [VisionScheduler] Current app preferences updated, rescheduling...`);
             this.reschedule();
           }
         } else {
+          console.log(`📸 [VisionScheduler] ⚠️ No preference found for "${appName}" in database`);
         }
       }
     } catch (error) {
@@ -128,20 +140,25 @@ class VisionScheduler {
    */
   shouldCapture() {
     if (!this.globalVisionEnabled) {
+      console.log(`📸 [VisionScheduler] shouldCapture = false (global vision disabled)`);
       return false;
     }
 
     if (!this.currentApp) {
+      console.log(`📸 [VisionScheduler] shouldCapture = false (no current app)`);
       return false;
     }
 
     const pref = this.appPreferences.get(this.currentApp);
 
     if (!pref) {
+      console.log(`📸 [VisionScheduler] shouldCapture = false (no preferences found for "${this.currentApp}")`);
+      console.log(`   Available apps in preferences:`, Array.from(this.appPreferences.keys()));
       return false;
     }
 
     const shouldCapture = pref.allow_vision === true;
+    console.log(`📸 [VisionScheduler] shouldCapture = ${shouldCapture} for "${this.currentApp}" (allow_vision=${pref.allow_vision})`);
 
     return shouldCapture;
   }
@@ -181,6 +198,7 @@ class VisionScheduler {
 
     const currentApp = this.currentApp || 'unknown';
     const shouldCapture = this.shouldCapture();
+    console.log(`📸 [VisionScheduler] Next capture for "${currentApp}" in ${interval / 1000}s (enabled: ${shouldCapture})`);
   }
 
   /**
@@ -197,20 +215,28 @@ class VisionScheduler {
    */
   async performCapture() {
     if (this.isCapturing) {
+      console.log('📸 [VisionScheduler] Already capturing, skipping...');
       return;
     }
 
     if (!this.shouldCapture()) {
+      console.log(`📸 [VisionScheduler] Skipping capture (vision disabled for ${this.currentApp || 'unknown app'})`);
       return;
     }
 
     this.isCapturing = true;
 
     try {
+      console.log(`\n========================================`);
+      console.log(`📸 [VisionScheduler] STARTING CAPTURE`);
+      console.log(`   App: ${this.currentApp}`);
+      console.log(`   Time: ${new Date().toISOString()}`);
+      console.log(`========================================`);
 
       // Get primary display
       const primaryDisplay = screen.getPrimaryDisplay();
       const { width, height } = primaryDisplay.size;
+      console.log(`📸 [VisionScheduler] Display size: ${width}x${height}`);
 
       // Capture screenshot
       const sources = await desktopCapturer.getSources({
@@ -223,6 +249,7 @@ class VisionScheduler {
         return;
       }
 
+      console.log(`📸 [VisionScheduler] Found ${sources.length} screen source(s)`);
 
       // Get the first screen (primary display)
       const source = sources[0];
@@ -231,8 +258,10 @@ class VisionScheduler {
       // Convert to PNG buffer
       const screenshotBuffer = screenshot.toPNG();
 
+      console.log(`📸 [VisionScheduler] ✅ Screenshot captured: ${(screenshotBuffer.length / 1024).toFixed(2)} KB`);
 
       // Queue vision job
+      console.log(`📸 [VisionScheduler] Sending to backend...`);
       await this.queueVisionJob(screenshotBuffer);
 
     } catch (error) {
@@ -250,6 +279,9 @@ class VisionScheduler {
       const pref = this.appPreferences.get(this.currentApp);
       const allowScreenshots = pref?.allow_screenshots || false;
 
+      console.log(`📸 [VisionScheduler] Preferences for ${this.currentApp}:`);
+      console.log(`   - allow_screenshots: ${allowScreenshots}`);
+      console.log(`   - vision_frequency: ${pref?.vision_frequency || 'normal'}`);
 
       // Create form data for multipart upload
       // Use native FormData (browser API), not form-data package
@@ -264,6 +296,7 @@ class VisionScheduler {
       formData.append('allow_screenshots', String(allowScreenshots));
 
       const uploadUrl = `${this.backendUrl}/api/vision/jobs/${this.userId}`;
+      console.log(`📸 [VisionScheduler] Uploading to: ${uploadUrl}`);
 
       // Send to backend
       const startTime = Date.now();
@@ -277,15 +310,23 @@ class VisionScheduler {
 
       if (response.ok) {
         const result = await response.json();
+        console.log(`📸 [VisionScheduler] ✅ Vision job created successfully!`);
+        console.log(`   - Job ID: ${result.data?.job_id || 'unknown'}`);
+        console.log(`   - Status: ${result.data?.status || 'unknown'}`);
+        console.log(`   - S3 stored: ${result.data?.allow_screenshots || false}`);
+        console.log(`   - Upload time: ${uploadTime}ms`);
+        console.log(`========================================\n`);
       } else {
         const errorText = await response.text();
         console.error(`📸 [VisionScheduler] ❌ Failed to queue vision job`);
         console.error(`   - Status: ${response.status}`);
         console.error(`   - Error: ${errorText}`);
+        console.log(`========================================\n`);
       }
 
     } catch (error) {
       console.error('📸 [VisionScheduler] ❌ Error queuing vision job:', error);
+      console.log(`========================================\n`);
     }
   }
 }
