@@ -1848,10 +1848,77 @@ async def process_batch_context(request: BatchContextRequest):
         if user_history:
             suggestions = await filter_duplicate_suggestions(suggestions, user_history)
 
+        # 💾 SAVE SUGGESTIONS TO DATABASE
+        print(f"\n{'='*60}")
+        print(f"💾 [AI] SAVING {len(suggestions)} SUGGESTIONS TO DATABASE")
+        print(f"   User ID: {request.user_id}")
+        print(f"   Session ID: {request.session_id}")
+
+        saved_suggestions = []
+        for i, suggestion in enumerate(suggestions):
+            try:
+                # Prepare suggestion_content with title included
+                suggestion_content = suggestion.get("content", {})
+                if "title" not in suggestion_content and "title" in suggestion:
+                    suggestion_content["title"] = suggestion.get("title", "")
+
+                # Convert priority from string to integer (1-10 scale)
+                priority_str = suggestion.get("priority", "medium")
+                priority_map = {"high": 8, "medium": 5, "low": 2}
+                priority_int = priority_map.get(priority_str, 5)
+
+                # Map LLM suggestion types to valid database types
+                # DB allows: 'productivity', 'workflow', 'automation', 'optimization', 'learning', 'reminder', 'insight'
+                llm_type = suggestion.get("type", "productivity")
+                type_mapping = {
+                    "workflow_optimization": "workflow",
+                    "task_completion": "productivity",
+                    "context_switch": "productivity",
+                    "knowledge_application": "learning",
+                    "efficiency": "optimization",
+                    "general": "productivity"
+                }
+                # Map or use the type directly if it's already valid
+                suggestion_type = type_mapping.get(llm_type, llm_type)
+
+                suggestion_data = {
+                    "user_id": request.user_id,
+                    "session_ids": [request.session_id],  # Array of session IDs
+                    "suggestion_type": suggestion_type,  # Mapped to valid DB type
+                    "suggestion_content": suggestion_content,  # JSONB with title inside
+                    "confidence_score": suggestion.get("confidence_score", 0.7),
+                    "priority": priority_int,  # INTEGER 1-10
+                    "context_data": suggestion.get("context_data", {}),
+                    "status": "pending"
+                }
+
+                print(f"   [{i+1}] Saving: {suggestion.get('title', 'Untitled')}")
+
+                result = await execute_query(
+                    table="ai_suggestions",
+                    operation="insert",
+                    data=suggestion_data
+                )
+
+                if result:
+                    print(f"       ✅ Saved to DB with ID: {result[0].get('id', 'unknown')}")
+                    saved_suggestions.append(result[0])
+                else:
+                    print(f"       ❌ Failed to save (no result)")
+
+            except Exception as save_error:
+                print(f"       ❌ Error saving suggestion: {save_error}")
+                import traceback
+                traceback.print_exc()
+
+        print(f"\n   📊 Summary: {len(saved_suggestions)}/{len(suggestions)} suggestions saved")
+        print(f"{'='*60}\n")
+
         return {
             "suggestions": suggestions,
             "sequence_id": request.sequence_metadata.sequence_id,
-            "request_type": request.request_type
+            "request_type": request.request_type,
+            "saved_count": len(saved_suggestions)
         }
 
     except Exception as e:

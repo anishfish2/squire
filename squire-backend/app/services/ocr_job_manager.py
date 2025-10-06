@@ -122,7 +122,6 @@ class OCRJobManager:
 
                 if job:
 
-                    print('we are processing something')
                     await self._process_job(worker_id, job)
                 else:
                     await asyncio.sleep(1)
@@ -164,7 +163,6 @@ class OCRJobManager:
 
     async def _process_job(self, worker_id: str, job: Dict):
         job_id = job["id"]
-        print(f"🔄 Worker {worker_id} processing job {job_id}")
         from app.routers.ai import extract_meaningful_context, extract_session_context
 
 
@@ -179,7 +177,6 @@ class OCRJobManager:
 
             text_lines = await asyncio.to_thread(worker_ocr.process_image, image_data)
 
-            print(f"✅ OCR completed: {len(text_lines)} text lines extracted")
 
             meaningful_context = ""
             session_context_data = {}

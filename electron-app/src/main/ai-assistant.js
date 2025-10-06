@@ -478,6 +478,9 @@ class AIAssistant {
   }
 
   async processBatchRequest(batchRequest) {
+    console.log(`🤖 [AI] Sending batch request to backend...`);
+    console.log(`   - URL: ${this.backendUrl}/api/ai/batch-context`);
+    console.log(`   - Apps in batch: ${batchRequest.app_sequence.length}`);
 
     try {
       const response = await this.makeHttpRequest(`${this.backendUrl}/api/ai/batch-context`, {
@@ -488,17 +491,25 @@ class AIAssistant {
         body: JSON.stringify(batchRequest)
       });
 
+      console.log(`🤖 [AI] Backend response received`);
+      console.log(`   - Suggestions: ${response.suggestions?.length || 0}`);
+      console.log(`   - Response:`, JSON.stringify(response).substring(0, 200));
+
       const suggestions = response.suggestions || [];
 
       if (suggestions.length > 0) {
+        console.log(`🤖 [AI] Processing ${suggestions.length} suggestions`);
         const combinedOCR = batchRequest.app_sequence.flatMap(app => app.ocrText || []);
         this.trackSuggestion(suggestions, combinedOCR);
+      } else {
+        console.log(`🤖 [AI] No suggestions returned from backend`);
       }
 
       return suggestions;
 
     } catch (error) {
-      console.error('❌ Error processing batch request:', error.message);
+      console.error('❌ [AI] Error processing batch request:', error.message);
+      console.error('   - Stack:', error.stack);
       return [];
     }
   }
