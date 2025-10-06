@@ -1,4 +1,4 @@
-const { io } = require('socket.io-client');
+import { io } from 'socket.io-client'
 
 class WebSocketManager {
   constructor() {
@@ -224,4 +224,4 @@ class WebSocketManager {
   }
 }
 
-module.exports = WebSocketManager;
+export default WebSocketManager

@@ -1,5 +1,5 @@
-const { globalShortcut, screen } = require('electron');
-const activeWin = require('active-win');
+import { globalShortcut, screen } from 'electron'
+import activeWin from 'active-win'
 let fetch;
 try {
   fetch = globalThis.fetch;
@@ -397,9 +397,6 @@ class ComprehensiveActivityTracker {
 
       if (response.ok) {
         const result = await response.json();
-        console.log(
-          `📊 Successfully sent ${transformedEvents.length} activity events to backend`
-        );
       } else {
         console.error(
           `❌ Failed to send activity events: ${response.status} ${response.statusText}`
@@ -469,5 +466,5 @@ class ComprehensiveActivityTracker {
   }
 }
 
-module.exports = ComprehensiveActivityTracker;
+export default ComprehensiveActivityTracker
 

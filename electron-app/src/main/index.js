@@ -1,12 +1,15 @@
-const { app, BrowserWindow, screen, ipcMain, Menu, dialog, systemPreferences, globalShortcut } = require("electron");
-const path = require("path");
+import { app, BrowserWindow, screen, ipcMain, Menu, dialog, systemPreferences, globalShortcut } from 'electron'
+import path from 'path'
+import { fileURLToPath } from 'url'
 
-const OCRManager = require("./ocr-manager");
-const ActiveAppTracker = require("./app-tracker");
-const ComprehensiveActivityTracker = require("./activity-tracker");
-const AIAssistant = require("./ai-assistant");
-const EfficientKeystrokeCollector = require("./keystroke-collector");
-const VisionScheduler = require("./vision-scheduler");
+import OCRManager from './ocr-manager.js'
+import ActiveAppTracker from './app-tracker.js'
+import ComprehensiveActivityTracker from './activity-tracker.js'
+import AIAssistant from './ai-assistant.js'
+import EfficientKeystrokeCollector from './keystroke-collector.js'
+import VisionScheduler from './vision-scheduler.js'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 let mainWindow;
 let debugWindow;
@@ -143,6 +146,7 @@ class OCRBatchManager {
     this.maxBatchSize = 5;
     this.currentSequenceId = null;
     this.pendingOCRJobs = new Map();
+    this.isProcessing = false;
   }
 
   async queueOCRJob(jobId, appContext, reason = "unknown") {
@@ -252,6 +256,8 @@ class OCRBatchManager {
   }
 
   async sendBatchToLLM(batch, sequenceId) {
+    console.log(`📊 [Batch] Preparing to send batch with ${batch.length} apps`);
+
     const sequenceMetadata = {
       sequence_id: sequenceId,
       total_apps: batch.length,
@@ -276,11 +282,14 @@ class OCRBatchManager {
       }
     };
 
+    console.log(`📊 [Batch] Sending batch to AI assistant...`);
+
     if (aiAssistant) {
       const suggestions = await aiAssistant.processBatchRequest(batchRequest);
 
 
       if (suggestions && suggestions.length > 0) {
+        console.log(`🤖 [AI] Received ${suggestions.length} suggestions`);
         const payload = {
           textLines: [],
           appName: batchRequest.app_sequence[batchRequest.app_sequence.length - 1]?.appName || 'Multiple Apps',
@@ -289,8 +298,10 @@ class OCRBatchManager {
         };
         sendToSuggestions('ai-suggestions', payload);
       } else {
+        console.log(`🤖 [AI] No suggestions generated`);
       }
     } else {
+      console.error('❌ AI assistant not initialized');
     }
   }
 
@@ -321,6 +332,94 @@ class OCRBatchManager {
     }
     this.processBatch();
   }
+
+  async forceBatchSubmission() {
+    // Edge Case 1: Empty batch
+    if (this.pendingBatch.length === 0) {
+      return {
+        status: 'empty',
+        message: 'No activity to analyze. Switch between apps to collect data.'
+      };
+    }
+
+    // Edge Case 2: Already processing (check if processBatch is running)
+    if (this.isProcessing) {
+      return {
+        status: 'busy',
+        message: 'Already processing suggestions. Please wait.'
+      };
+    }
+
+    // Edge Case 3: No AI assistant initialized
+    if (!aiAssistant) {
+      return {
+        status: 'error',
+        message: 'AI assistant not initialized.'
+      };
+    }
+
+    // Edge Case 4: Missing user/session ID
+    if (!currentUserId || !currentSessionId) {
+      return {
+        status: 'error',
+        message: 'User session not initialized.'
+      };
+    }
+
+    // Edge Case 5: Wait briefly for pending OCR jobs (simpler approach - submit immediately)
+    const incompletejobs = this.pendingBatch.filter(item => !item.ocrCompleted).length;
+    if (incompletejobs > 0) {
+      console.log(`⚠️ Force submit: ${incompletejobs} OCR jobs still pending, submitting anyway...`);
+    }
+
+    // Mark as processing
+    this.isProcessing = true;
+
+    // Clear scheduled batch timeout to prevent double submission
+    if (this.batchTimeout) {
+      clearTimeout(this.batchTimeout);
+      this.batchTimeout = null;
+    }
+
+    try {
+      // Copy batch for sending (don't clear yet in case of failure)
+      const batch = [...this.pendingBatch];
+      const sequenceId = this.currentSequenceId;
+
+      // Send to LLM
+      await this.sendBatchToLLM(batch, sequenceId);
+
+      // Only clear batch state on success
+      this.pendingBatch = [];
+      this.pendingOCRJobs.clear();
+      this.currentSequenceId = null;
+
+      return {
+        status: 'success',
+        message: `Analyzed ${batch.length} app(s)`,
+        count: batch.length
+      };
+
+    } catch (error) {
+      console.error('❌ Force batch submission error:', error);
+
+      // On API failure, keep batch intact for retry
+      // Re-enable batch timeout for automatic processing
+      if (!this.batchTimeout) {
+        this.batchTimeout = setTimeout(() => {
+          this.checkBatchReadiness();
+        }, this.batchWindow);
+      }
+
+      return {
+        status: 'error',
+        message: `Failed to analyze: ${error.message}`,
+        canRetry: true
+      };
+    } finally {
+      this.isProcessing = false;
+    }
+  }
 }
 
 function createMainWindow() {
@@ -336,7 +435,11 @@ function createMainWindow() {
     },
   });
 
-  mainWindow.loadFile(path.join(__dirname, "debug.html"));
+  if (process.env.VITE_DEV_SERVER_URL) {
+    mainWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}/debug/index.html`);
+  } else {
+    mainWindow.loadFile(path.join(__dirname, '../renderer/debug/index.html'));
+  }
 
   mainWindow.on("closed", () => {
     mainWindow = null;
@@ -368,7 +471,11 @@ function createDebugWindow() {
     },
   });
 
-  debugWindow.loadFile("debug.html");
+  if (process.env.VITE_DEV_SERVER_URL) {
+    debugWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}/debug/index.html`);
+  } else {
+    debugWindow.loadFile(path.join(__dirname, '../renderer/debug/index.html'));
+  }
 
   // 🚀 Enhanced: Aggressive workspace persistence for macOS
   debugWindow.once("ready-to-show", () => {
@@ -448,7 +555,11 @@ function createSuggestionsWindow() {
     },
   });
 
-  suggestionsWindow.loadFile("suggestions.html");
+  if (process.env.VITE_DEV_SERVER_URL) {
+    suggestionsWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}/suggestions/index.html`);
+  } else {
+    suggestionsWindow.loadFile(path.join(__dirname, '../renderer/suggestions/index.html'));
+  }
 
   suggestionsWindow.webContents.openDevTools({ mode: 'detach' });
 
@@ -542,10 +653,17 @@ function createSettingsWindow() {
     },
   });
 
-  settingsWindow.loadFile("settings.html").then(() => {
-  }).catch(err => {
-    console.error('❌ Failed to load settings window:', err);
-  });
+  if (process.env.VITE_DEV_SERVER_URL) {
+    settingsWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}/settings/index.html`).then(() => {
+    }).catch(err => {
+      console.error('❌ Failed to load settings window:', err);
+    });
+  } else {
+    settingsWindow.loadFile(path.join(__dirname, '../renderer/settings/index.html')).then(() => {
+    }).catch(err => {
+      console.error('❌ Failed to load settings window:', err);
+    });
+  }
 
   settingsWindow.on('closed', () => {
     settingsWindow = null;
@@ -1060,6 +1178,30 @@ ipcMain.on("suggestions-set-ignore-mouse-events", (event, ignore, options) => {
 ipcMain.on("move-suggestions-window", (event, x, y) => {
   if (suggestionsWindow && !suggestionsWindow.isDestroyed()) {
     suggestionsWindow.setPosition(Math.round(x), Math.round(y));
+  }
+});
+
+// Force suggestion request handler
+ipcMain.handle("force-suggestion-request", async (event) => {
+  console.log('🔍 Force suggestion request received');
+
+  if (!ocrBatchManager) {
+    return {
+      status: 'error',
+      message: 'Batch manager not initialized'
+    };
+  }
+
+  try {
+    const result = await ocrBatchManager.forceBatchSubmission();
+    console.log('Force suggestion result:', result);
+    return result;
+  } catch (error) {
+    console.error('Error handling force suggestion request:', error);
+    return {
+      status: 'error',
+      message: error.message || 'Unknown error occurred'
+    };
   }
 });
 

@@ -2,15 +2,16 @@
   "name": "squire-electron",
   "version": "1.0.0",
   "description": "OCR overlay app with app focus monitoring",
-  "main": "main.js",
+  "main": "./out/main/index.js",
   "scripts": {
-    "start": "npm run build:css && electron .",
-    "dev": "npm run build:css && electron . --enable-logging",
-    "build": "electron-builder",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "start": "electron-vite preview",
     "build:css": "tailwindcss -i ./src-styles.css -o ./styles.css --minify",
     "build:css:watch": "tailwindcss -i ./src-styles.css -o ./styles.css --watch",
-    "build-and-run": "npm run build && open dist/mac-arm64/Squire.app",
-    "dist": "electron-builder --publish=never"
+    "dist": "npm run build && electron-builder",
+    "build-and-run": "npm run dist && open dist/mac-arm64/Squire.app"
   },
   "keywords": [
     "ocr",
@@ -20,22 +21,28 @@
   "author": "Anish Karthik",
   "license": "MIT",
   "devDependencies": {
-    "@eslint/js": "^9.36.0",
+    "@eslint/js": "^9.37.0",
+    "@vitejs/plugin-react": "^5.0.4",
     "autoprefixer": "^10.4.21",
     "electron": "^27.0.0",
     "electron-builder": "^24.6.4",
-    "eslint": "^9.36.0",
+    "electron-vite": "^4.0.1",
+    "eslint": "^9.37.0",
     "eslint-plugin-react": "^7.37.5",
     "globals": "^16.4.0",
     "postcss": "^8.5.6",
-    "tailwindcss": "^3.4.17"
+    "tailwindcss": "^3.4.17",
+    "vite": "^7.1.9"
   },
   "dependencies": {
     "@paymoapp/active-window": "^2.1.2",
     "active-win": "^8.0.0",
+    "axios": "^1.12.2",
     "form-data": "^4.0.4",
     "node-global-key-listener": "^0.3.0",
     "node-mac-permissions": "^2.5.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
     "screenshot-desktop": "^1.12.7",
     "socket.io-client": "^4.8.1"
   },
@@ -43,26 +50,12 @@
     "appId": "com.anishkarthik.squire",
     "productName": "Squire",
     "directories": {
-      "output": "dist"
+      "output": "dist",
+      "buildResources": "assets"
     },
     "files": [
-      "main.js",
-      "renderer.html",
-      "renderer.js",
-      "debug.html",
-      "debug.js",
-      "suggestions.html",
-      "suggestions.js",
-      "settings.html",
-      "settings.js",
+      "out/**/*",
       "styles.css",
-      "ocr-manager.js",
-      "websocket-manager.js",
-      "app-tracker.js",
-      "activity-tracker.js",
-      "keystroke-collector.js",
-      "ai-assistant.js",
-      "vision-scheduler.js",
       "node_modules/**/*"
     ],
     "asarUnpack": [

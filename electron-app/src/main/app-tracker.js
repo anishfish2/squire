@@ -1,4 +1,6 @@
-const ActiveWindow = require('@paymoapp/active-window').default;
+import { createRequire } from 'module'
+const require = createRequire(import.meta.url)
+const ActiveWindow = require('@paymoapp/active-window').default
 
 ActiveWindow.initialize();
 
@@ -80,5 +82,5 @@ class ActiveAppTracker {
   }
 }
 
-module.exports = ActiveAppTracker;
+export default ActiveAppTracker
 

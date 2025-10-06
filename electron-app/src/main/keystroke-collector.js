@@ -1,5 +1,5 @@
-const { globalShortcut, app } = require('electron');
-const { GlobalKeyboardListener } = require('node-global-key-listener');
+import { globalShortcut, app } from 'electron'
+import { GlobalKeyboardListener } from 'node-global-key-listener'
 
 class EfficientKeystrokeCollector {
   constructor(onSequenceReady) {
@@ -546,4 +546,4 @@ class EfficientKeystrokeCollector {
   }
 }
 
-module.exports = EfficientKeystrokeCollector;
+export default EfficientKeystrokeCollector

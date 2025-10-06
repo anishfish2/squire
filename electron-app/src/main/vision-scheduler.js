@@ -1,5 +1,7 @@
 // vision-scheduler.js
-const { desktopCapturer, screen } = require('electron');
+import { desktopCapturer, screen } from 'electron'
+import FormData from 'form-data'
+import axios from 'axios'
 
 class VisionScheduler {
   constructor(backendUrl, userId, sessionId) {
@@ -25,9 +27,13 @@ class VisionScheduler {
    * Start vision capture scheduling
    */
   async startScheduling() {
+    console.log('📸 [VisionScheduler] Starting vision scheduler...');
 
     // Load app preferences from backend
     await this.loadAppPreferences();
+
+    console.log(`📸 [VisionScheduler] Loaded ${this.appPreferences.size} app preferences`);
+    console.log(`📸 [VisionScheduler] Global vision enabled: ${this.globalVisionEnabled}`);
 
     // Start capture loop
     this.scheduleNextCapture();
@@ -251,43 +257,53 @@ class VisionScheduler {
       const allowScreenshots = pref?.allow_screenshots || false;
 
 
-      // Create form data for multipart upload
-      // Use native FormData (browser API), not form-data package
+      // Create form data for multipart upload (Node.js form-data package)
       const formData = new FormData();
 
-      // Create a Blob from the buffer
-      const blob = new Blob([screenshotBuffer], { type: 'image/png' });
-
-      formData.append('file', blob, `screenshot-${Date.now()}.png`);
+      // Append the screenshot buffer directly
+      formData.append('file', screenshotBuffer, {
+        filename: `screenshot-${Date.now()}.png`,
+        contentType: 'image/png'
+      });
       formData.append('app_name', this.currentApp);
       formData.append('session_id', this.sessionId);
       formData.append('allow_screenshots', String(allowScreenshots));
 
       const uploadUrl = `${this.backendUrl}/api/vision/jobs/${this.userId}`;
 
-      // Send to backend
+      console.log(`📸 [VisionScheduler] Capturing for: ${this.currentApp}`);
+
+      // Send to backend using axios (handles FormData properly)
       const startTime = Date.now();
-      const response = await fetch(uploadUrl, {
-        method: 'POST',
-        body: formData
-        // Don't set Content-Type header - fetch will set it automatically with boundary
+      const response = await axios.post(uploadUrl, formData, {
+        headers: formData.getHeaders(),
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity
       });
 
       const uploadTime = Date.now() - startTime;
+      const result = response.data;
 
-      if (response.ok) {
-        const result = await response.json();
-      } else {
-        const errorText = await response.text();
-        console.error(`📸 [VisionScheduler] ❌ Failed to queue vision job`);
-        console.error(`   - Status: ${response.status}`);
-        console.error(`   - Error: ${errorText}`);
-      }
+      console.log(`📸 [VisionScheduler] ✅ Vision job queued (${uploadTime}ms)`);
+      console.log(`   - Job ID: ${result.job_id || 'N/A'}`);
+      console.log(`   - App: ${this.currentApp}`);
 
     } catch (error) {
-      console.error('📸 [VisionScheduler] ❌ Error queuing vision job:', error);
+      if (error.response) {
+        // Server responded with error status
+        console.error(`📸 [VisionScheduler] ❌ Failed to queue vision job`);
+        console.error(`   - Status: ${error.response.status}`);
+        console.error(`   - Error: ${JSON.stringify(error.response.data)}`);
+      } else if (error.request) {
+        // Request made but no response
+        console.error('📸 [VisionScheduler] ❌ No response from backend');
+        console.error(`   - Error: ${error.message}`);
+      } else {
+        // Error setting up request
+        console.error('📸 [VisionScheduler] ❌ Error queuing vision job:', error.message);
+      }
     }
   }
 }
 
-module.exports = VisionScheduler;
+export default VisionScheduler

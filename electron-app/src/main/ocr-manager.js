@@ -1,6 +1,6 @@
-const screenshot = require('screenshot-desktop');
-const FormData = require('form-data');
-const WebSocketManager = require('./websocket-manager');
+import screenshot from 'screenshot-desktop'
+import FormData from 'form-data'
+import WebSocketManager from './websocket-manager.js'
 
 class OCRManager {
   constructor(overlayWindow = null) {
@@ -370,4 +370,4 @@ class OCRManager {
   }
 }
 
-module.exports = OCRManager;
+export default OCRManager

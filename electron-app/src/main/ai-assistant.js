@@ -642,4 +642,4 @@ class AIAssistant {
   }
 }
 
-module.exports = AIAssistant;
+export default AIAssistant
