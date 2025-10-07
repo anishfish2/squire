@@ -35,6 +35,7 @@
     "vite": "^7.1.9"
   },
   "dependencies": {
+    "@loomhq/electron-click-through-workaround": "^0.0.1",
     "@paymoapp/active-window": "^2.1.2",
     "active-win": "^8.0.0",
     "axios": "^1.12.2",

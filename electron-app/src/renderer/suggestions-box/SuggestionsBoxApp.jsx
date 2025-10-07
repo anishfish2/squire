@@ -1,17 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
+import { createRoot } from 'react-dom/client'
+import '@/styles.css'
 
 const { ipcRenderer } = window.require('electron')
 
-function SuggestionsApp() {
+function SuggestionsBoxApp() {
   const [suggestions, setSuggestions] = useState([])
-  const [isExpanded, setIsExpanded] = useState(false)
   const [isHovered, setIsHovered] = useState(false)
   const [expandedSuggestions, setExpandedSuggestions] = useState(new Set())
 
   const idleTimerRef = useRef(null)
-  const overlayContainerRef = useRef(null)
-  const textBoxRef = useRef(null)
-  const dotRef = useRef(null)
   const dragStateRef = useRef({
     isDragging: false,
     startX: 0,
@@ -30,11 +28,11 @@ function SuggestionsApp() {
       clearTimeout(idleTimerRef.current)
     }
     idleTimerRef.current = setTimeout(() => {
-      if (!isHovered && isExpanded) {
-        setIsExpanded(false)
+      if (!isHovered) {
+        ipcRenderer.send('toggle-suggestions-box', false)
       }
     }, IDLE_TIMEOUT_MS)
-  }, [isHovered, isExpanded])
+  }, [isHovered])
 
   // Pause idle timer
   const pauseIdleTimer = useCallback(() => {
@@ -47,77 +45,28 @@ function SuggestionsApp() {
   // Handle AI suggestions from IPC
   useEffect(() => {
     const handleAISuggestions = (event, data) => {
-      console.log('Received AI suggestions:', data)
+      console.log('Suggestions box received AI suggestions:', data)
       if (data.aiSuggestions && data.aiSuggestions.length > 0) {
         setSuggestions(data.aiSuggestions)
-        setIsExpanded(true)
       }
     }
 
     ipcRenderer.on('ai-suggestions', handleAISuggestions)
-    ipcRenderer.send('suggestions-set-ignore-mouse-events', false)
 
     return () => {
       ipcRenderer.removeListener('ai-suggestions', handleAISuggestions)
     }
   }, [])
 
-  // Start idle timer when expanded
+  // Start idle timer when window is shown
   useEffect(() => {
-    if (isExpanded) {
-      startIdleTimer()
-    }
+    startIdleTimer()
     return () => {
       if (idleTimerRef.current) {
         clearTimeout(idleTimerRef.current)
       }
     }
-  }, [isExpanded, startIdleTimer])
-
-  // Handle force suggestion request
-  const handleForceSuggestion = async (e) => {
-    e.stopPropagation()
-    const button = e.currentTarget
-    button.disabled = true
-    button.style.opacity = '0.4'
-
-    try {
-      const result = await ipcRenderer.invoke('force-suggestion-request')
-
-      if (result.status === 'success') {
-        button.style.backgroundColor = 'rgba(34, 197, 94, 0.2)'
-        setTimeout(() => {
-          button.style.backgroundColor = ''
-        }, 1500)
-      } else if (result.status === 'empty') {
-        button.style.backgroundColor = 'rgba(251, 191, 36, 0.2)'
-        setTimeout(() => {
-          button.style.backgroundColor = ''
-        }, 2000)
-      } else if (result.status === 'busy') {
-        button.style.backgroundColor = 'rgba(96, 165, 250, 0.2)'
-        setTimeout(() => {
-          button.style.backgroundColor = ''
-        }, 1500)
-      } else if (result.status === 'error') {
-        button.style.backgroundColor = 'rgba(239, 68, 68, 0.2)'
-        setTimeout(() => {
-          button.style.backgroundColor = ''
-        }, 2000)
-      }
-    } catch (error) {
-      console.error('Force suggestion failed:', error)
-      button.style.backgroundColor = 'rgba(239, 68, 68, 0.2)'
-      setTimeout(() => {
-        button.style.backgroundColor = ''
-      }, 2000)
-    } finally {
-      setTimeout(() => {
-        button.disabled = false
-        button.style.opacity = '1'
-      }, 1500)
-    }
-  }
+  }, [startIdleTimer])
 
   // Toggle suggestion details
   const toggleSuggestion = (index) => {
@@ -155,7 +104,7 @@ function SuggestionsApp() {
     const newScreenX = dragState.startBoxX + deltaX
     const newScreenY = dragState.startBoxY + deltaY
 
-    ipcRenderer.send('move-suggestions-window', newScreenX, newScreenY)
+    ipcRenderer.send('move-suggestions-box-window', newScreenX, newScreenY)
   }, [])
 
   const handleMouseUp = useCallback((e) => {
@@ -187,67 +136,38 @@ function SuggestionsApp() {
 
   return (
     <div
-      ref={overlayContainerRef}
-      id="overlay-container"
-      className="w-screen h-screen relative flex items-start justify-end pointer-events-none"
+      className="w-auto min-w-[280px] max-w-[420px] min-h-[60px] max-h-[520px] bg-black rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.6),inset_0_1px_1px_rgba(255,255,255,0.1)] backdrop-blur-3xl overflow-hidden"
+      style={{ WebkitAppRegion: 'no-drag' }}
+      onMouseEnter={() => {
+        setIsHovered(true)
+        pauseIdleTimer()
+      }}
+      onMouseLeave={() => {
+        setIsHovered(false)
+        startIdleTimer()
+      }}
     >
-      {/* Dot button */}
-      {!isExpanded && (
-        <div
-          ref={dotRef}
-          className="dot w-14 h-14 bg-gradient-to-b from-white/10 to-white/5 rounded-full shadow-[0_4px_16px_rgba(0,0,0,0.3),inset_0_1px_1px_rgba(255,255,255,0.3)] backdrop-blur-2xl cursor-pointer transition-all duration-300 ease-out absolute top-5 right-[26px] z-10 pointer-events-auto [-webkit-app-region:no-drag] flex items-center justify-center hover:scale-105 hover:shadow-[0_6px_20px_rgba(0,0,0,0.4),inset_0_1px_2px_rgba(255,255,255,0.4)] hover:border-white/30 hover:bg-gradient-to-b hover:from-white/15 hover:to-white/8"
-          onClick={(e) => {
-            e.stopPropagation()
-            if (suggestions.length > 0) {
-              setIsExpanded(true)
-            }
-          }}
-          onMouseDown={handleMouseDown}
-        />
-      )}
-
-      {/* Force suggestion button */}
-      <button
-        className="force-btn w-8 h-8 bg-white/5 rounded-full shadow-[0_2px_8px_rgba(0,0,0,0.3)] backdrop-blur-xl cursor-pointer transition-all duration-200 ease-out absolute top-[90px] right-[30px] z-10 pointer-events-auto [-webkit-app-region:no-drag] flex items-center justify-center hover:bg-white/10 hover:scale-105 border border-white/10 hover:border-white/20"
-        title="Get Suggestions Now"
-        onClick={handleForceSuggestion}
+      {/* Drag handle at the top */}
+      <div
+        className="w-full h-6 cursor-move bg-white/5 flex items-center justify-center border-b border-white/10"
+        onMouseDown={handleMouseDown}
       >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white/70">
-          <circle cx="11" cy="11" r="8"></circle>
-          <path d="m21 21-4.35-4.35"></path>
-        </svg>
-      </button>
+        <div className="w-8 h-1 bg-white/20 rounded-full" />
+      </div>
 
-      {/* Text box with suggestions */}
-      {isExpanded && (
-        <div
-          ref={textBoxRef}
-          className="text-box w-auto min-w-[280px] max-w-[420px] min-h-[60px] max-h-[520px] bg-black rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.6),inset_0_1px_1px_rgba(255,255,255,0.1)] backdrop-blur-3xl absolute top-5 right-[15px] overflow-hidden z-[5] pointer-events-auto"
-          onMouseEnter={() => {
-            setIsHovered(true)
-            pauseIdleTimer()
-          }}
-          onMouseLeave={() => {
-            setIsHovered(false)
-            startIdleTimer()
-          }}
-          onMouseDown={handleMouseDown}
-        >
-          <div className="text-content p-3 max-h-[480px] h-auto overflow-y-auto overflow-x-hidden custom-scrollbar">
-            <div className="text-white text-sm leading-relaxed break-words text-left">
-              {suggestions.map((suggestion, index) => (
-                <SuggestionItem
-                  key={index}
-                  suggestion={suggestion}
-                  index={index}
-                  isExpanded={expandedSuggestions.has(index)}
-                  onToggle={() => toggleSuggestion(index)}
-                />
-              ))}
-            </div>
-          </div>
+      <div className="text-content p-3 max-h-[480px] h-auto overflow-y-auto overflow-x-hidden custom-scrollbar">
+        <div className="text-white text-sm leading-relaxed break-words text-left">
+          {suggestions.map((suggestion, index) => (
+            <SuggestionItem
+              key={index}
+              suggestion={suggestion}
+              index={index}
+              isExpanded={expandedSuggestions.has(index)}
+              onToggle={() => toggleSuggestion(index)}
+            />
+          ))}
         </div>
-      )}
+      </div>
     </div>
   )
 }
@@ -336,4 +256,11 @@ function SuggestionItem({ suggestion, index, isExpanded, onToggle }) {
   )
 }
 
-export default SuggestionsApp
+const container = document.getElementById('root')
+// Force transparent background
+document.body.style.backgroundColor = 'transparent'
+document.documentElement.style.backgroundColor = 'transparent'
+container.style.backgroundColor = 'transparent'
+
+const root = createRoot(container)
+root.render(<SuggestionsBoxApp />)

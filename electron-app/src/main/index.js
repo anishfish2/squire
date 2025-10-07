@@ -2,6 +2,7 @@ import { app, BrowserWindow, screen, ipcMain, Menu, dialog, systemPreferences, g
 import path from 'path'
 import { fileURLToPath } from 'url'
 
+import process from 'process';
 import OCRManager from './ocr-manager.js'
 import ActiveAppTracker from './app-tracker.js'
 import ComprehensiveActivityTracker from './activity-tracker.js'
@@ -13,7 +14,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 let mainWindow;
 let debugWindow;
-let suggestionsWindow;
+let suggestionsWindow; // Legacy - will be removed
+let dotWindow;
+let suggestionsBoxWindow;
+let forceButtonWindow;
 let settingsWindow;
 let ocrManager;
 let appTracker;
@@ -33,6 +37,16 @@ let currentSessionId = null;
 let detectedApps = new Set();
 let appPreferences = new Map(); // Cache of app preferences
 
+// For macOS transparency to work:
+// - Keep GPU and hardware acceleration ENABLED
+// - Use type: 'toolbar' window type
+// - Do NOT use disable-gpu, disable-gpu-compositing, or disableHardwareAcceleration()
+
+if (process.platform === 'darwin') {
+  app.dock.hide(); // Hide from dock to avoid window manager interference
+}
+
+
 function sendToDebug(channel, data) {
   if (debugWindow && !debugWindow.isDestroyed()) {
     debugWindow.webContents.send(channel, data);
@@ -40,8 +54,14 @@ function sendToDebug(channel, data) {
 }
 
 function sendToSuggestions(channel, data) {
-  if (suggestionsWindow && !suggestionsWindow.isDestroyed()) {
-    suggestionsWindow.webContents.send(channel, data);
+  // Send to suggestions box window
+  if (suggestionsBoxWindow && !suggestionsBoxWindow.isDestroyed()) {
+    suggestionsBoxWindow.webContents.send(channel, data);
+  }
+
+  // Also send to dot window for notification count updates, etc.
+  if (dotWindow && !dotWindow.isDestroyed()) {
+    dotWindow.webContents.send(channel, data);
   }
 }
 
@@ -297,6 +317,16 @@ class OCRBatchManager {
           aiSuggestions: suggestions
         };
         sendToSuggestions('ai-suggestions', payload);
+
+        // Show the suggestions box window
+        if (suggestionsBoxWindow && !suggestionsBoxWindow.isDestroyed()) {
+          suggestionsBoxWindow.show();
+          console.log('📦 [MAIN] Showing suggestions box with AI suggestions');
+        }
+        // Hide the dot window
+        if (dotWindow && !dotWindow.isDestroyed()) {
+          dotWindow.hide();
+        }
       } else {
         console.log(`🤖 [AI] No suggestions generated`);
       }
@@ -429,6 +459,8 @@ function createMainWindow() {
     show: false,
     skipTaskbar: false,
     focusable: true,
+    transparent: true,
+    backgroundColor: '#00000000',
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
@@ -450,105 +482,77 @@ function createMainWindow() {
 
 
 
-function createDebugWindow() {
-  debugWindow = new BrowserWindow({
-    width: 300,
-    height: 200,
-    x: 20,
+
+
+function createDotWindow() {
+  const { width } = screen.getPrimaryDisplay().workAreaSize;
+
+  dotWindow = new BrowserWindow({
+    width: 56,
+    height: 56,
+    x: width - 82,
     y: 20,
     frame: false,
     transparent: true,
-    resizable: true,
+    backgroundColor: '#00000000',
+    hasShadow: false,
+    resizable: false,
     movable: true,
     skipTaskbar: true,
-    focusable: false,
+    acceptFirstMouse: true,
     fullscreenable: false,
     alwaysOnTop: true,
-    type: 'panel',  // Required for workspace persistence (macOS warning is harmless)
+    type: 'panel',
+    roundedCorners: false,
+    show: false,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
+      backgroundThrottling: false,
     },
   });
 
   if (process.env.VITE_DEV_SERVER_URL) {
-    debugWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}/debug/index.html`);
+    dotWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}/dot/index.html`);
   } else {
-    debugWindow.loadFile(path.join(__dirname, '../renderer/debug/index.html'));
+    dotWindow.loadFile(path.join(__dirname, '../renderer/dot/index.html'));
   }
 
-  // 🚀 Enhanced: Aggressive workspace persistence for macOS
-  debugWindow.once("ready-to-show", () => {
-    debugWindow.show();
-
-    // WORKAROUND: Electron bug requires window to be focused once for settings to stick
-    debugWindow.setFocusable(true);
-    debugWindow.focus();
-
-    // Apply settings while focused
-    debugWindow.setAlwaysOnTop(true, "screen-saver");
-    debugWindow.setVisibleOnAllWorkspaces(true, {
+  dotWindow.once("ready-to-show", () => {
+    dotWindow.setAlwaysOnTop(true, "screen-saver");
+    dotWindow.setVisibleOnAllWorkspaces(true, {
       visibleOnFullScreen: true,
       skipTransformProcessType: true,
     });
-
-    // Restore non-focusable behavior after settings are applied
-    setTimeout(() => {
-      debugWindow.setFocusable(false);
-      debugWindow.blur();
-
-      // Re-apply settings with screen-saver level
-      debugWindow.setAlwaysOnTop(true, "screen-saver");
-      debugWindow.setVisibleOnAllWorkspaces(true, {
-        visibleOnFullScreen: true,
-        skipTransformProcessType: true,
-      });
-    }, 300);
+    dotWindow.show();
   });
 
-  // Constantly re-enforce on various events
-  const enforceVisibility = () => {
-    if (debugWindow && !debugWindow.isDestroyed()) {
-      debugWindow.setAlwaysOnTop(true, "screen-saver");
-      debugWindow.setVisibleOnAllWorkspaces(true, {
-        visibleOnFullScreen: true,
-        skipTransformProcessType: true,
-      });
-    }
-  };
+  dotWindow.webContents.on('did-finish-load', () => {
+    dotWindow.webContents.insertCSS('html, body, * { background: transparent !important; background-color: transparent !important; }');
+  });
 
-  debugWindow.on("show", enforceVisibility);
-  debugWindow.on("blur", enforceVisibility);
-  debugWindow.on("focus", enforceVisibility);
-  debugWindow.on("move", enforceVisibility);
-
-  // Periodic re-enforcement (every 2 seconds)
-  setInterval(() => {
-    if (debugWindow && !debugWindow.isDestroyed() && debugWindow.isVisible()) {
-      enforceVisibility();
-    }
-  }, 2000);
-
-  return debugWindow;
+  return dotWindow;
 }
 
-function createSuggestionsWindow() {
+function createSuggestionsBoxWindow() {
   const { width } = screen.getPrimaryDisplay().workAreaSize;
 
-  suggestionsWindow = new BrowserWindow({
-    width: 400,
-    height: 500,
-    x: width - 420,
-    y: 20,
+  suggestionsBoxWindow = new BrowserWindow({
+    width: 420,
+    height: 520,
+    x: width - 435,  // right-[15px]
+    y: 20,  // top-5
     frame: false,
     transparent: true,
     resizable: true,
     movable: true,
     skipTaskbar: true,
     focusable: true,
+    backgroundColor: '#00000000',
+    vibrancy: 'under-window',
     fullscreenable: false,
     alwaysOnTop: true,
-    type: 'panel',
+    show: false,  // Hidden by default
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
@@ -556,71 +560,70 @@ function createSuggestionsWindow() {
   });
 
   if (process.env.VITE_DEV_SERVER_URL) {
-    suggestionsWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}/suggestions/index.html`);
+    suggestionsBoxWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}/suggestions-box/index.html`);
   } else {
-    suggestionsWindow.loadFile(path.join(__dirname, '../renderer/suggestions/index.html'));
+    suggestionsBoxWindow.loadFile(path.join(__dirname, '../renderer/suggestions-box/index.html'));
   }
 
-  suggestionsWindow.webContents.openDevTools({ mode: 'detach' });
-
-  suggestionsWindow.once("ready-to-show", () => {
-    suggestionsWindow.show();
-
-    suggestionsWindow.setFocusable(true);
-    suggestionsWindow.focus();
-
-    suggestionsWindow.setAlwaysOnTop(true, "screen-saver");
-    suggestionsWindow.setVisibleOnAllWorkspaces(true, {
+  suggestionsBoxWindow.once("ready-to-show", () => {
+    suggestionsBoxWindow.setAlwaysOnTop(true, "screen-saver");
+    suggestionsBoxWindow.setVisibleOnAllWorkspaces(true, {
       visibleOnFullScreen: true,
       skipTransformProcessType: true,
     });
-
-    setTimeout(() => {
-      suggestionsWindow.setAlwaysOnTop(true, "screen-saver");
-      suggestionsWindow.setVisibleOnAllWorkspaces(true, {
-        visibleOnFullScreen: true,
-        skipTransformProcessType: true,
-      });
-
-      // suggestionsWindow.setIgnoreMouseEvents(true, { forward: true });
-
-    }, 300);
   });
 
-  let visibilityTimeout = null;
-  let lastEnforcement = 0;
-  const ENFORCEMENT_COOLDOWN = 500;
+  return suggestionsBoxWindow;
+}
 
-  const enforceVisibility = () => {
-    if (visibilityTimeout) clearTimeout(visibilityTimeout);
+function createForceButtonWindow() {
+  const { width } = screen.getPrimaryDisplay().workAreaSize;
 
-    visibilityTimeout = setTimeout(() => {
-      const now = Date.now();
-      if (now - lastEnforcement < ENFORCEMENT_COOLDOWN) {
-        return;
-      }
+  forceButtonWindow = new BrowserWindow({
+    width: 32,  // 8 * 4 (2rem)
+    height: 32,
+    x: width - 62,  // right-[30px]
+    y: 90,  // top-[90px]
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000', // Fully transparent
+    resizable: false,
+    movable: true,
+    skipTaskbar: true,
+    focusable: true,
+    fullscreenable: false,
+    alwaysOnTop: true,
+    hasShadow: false,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+    },
+  });
 
-      if (suggestionsWindow && !suggestionsWindow.isDestroyed()) {
-        suggestionsWindow.setAlwaysOnTop(true, "screen-saver");
-        suggestionsWindow.setVisibleOnAllWorkspaces(true, {
-          visibleOnFullScreen: true,
-          skipTransformProcessType: true,
-        });
-        lastEnforcement = now;
-      }
-    }, 250);
-  };
+  if (process.env.VITE_DEV_SERVER_URL) {
+    forceButtonWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}/force-button/index.html`);
+  } else {
+    forceButtonWindow.loadFile(path.join(__dirname, '../renderer/force-button/index.html'));
+  }
 
-  suggestionsWindow.on("show", enforceVisibility);
-  suggestionsWindow.on("blur", enforceVisibility);
+  forceButtonWindow.once("ready-to-show", () => {
+    forceButtonWindow.show();
+    forceButtonWindow.setAlwaysOnTop(true, "screen-saver");
+    forceButtonWindow.setVisibleOnAllWorkspaces(true, {
+      visibleOnFullScreen: true,
+      skipTransformProcessType: true,
+    });
+  });
 
-  setInterval(() => {
-    if (suggestionsWindow && !suggestionsWindow.isDestroyed() && suggestionsWindow.isVisible()) {
-      enforceVisibility();
-    }
-  }, 2000);
+  return forceButtonWindow;
+}
 
-  return suggestionsWindow;
+function createSuggestionsWindow() {
+  createDotWindow();
+  createSuggestionsBoxWindow();
+  createForceButtonWindow();
+
+  return dotWindow;
 }
 
 function createSettingsWindow() {
@@ -1163,21 +1166,48 @@ ipcMain.on("debug-set-ignore-mouse-events", (event, ignore, options) => {
   }
 });
 
-ipcMain.on("suggestions-set-ignore-mouse-events", (event, ignore, options) => {
-  console.log('🖱️ [MAIN] Received suggestions-set-ignore-mouse-events:', ignore, options);
-  if (suggestionsWindow && !suggestionsWindow.isDestroyed()) {
-    // ignore=true means: enable click-through (mouse events pass through)
-    // ignore=false means: disable click-through (window receives mouse events)
-    suggestionsWindow.setIgnoreMouseEvents(ignore, options);
-    console.log('   ✅ [MAIN] setIgnoreMouseEvents applied:', ignore);
-  } else {
-    console.log('   ❌ [MAIN] suggestionsWindow not available');
+// Toggle suggestions box visibility
+ipcMain.on("toggle-suggestions-box", (event, show) => {
+  console.log('🔄 [MAIN] Toggle suggestions box:', show);
+  if (suggestionsBoxWindow && !suggestionsBoxWindow.isDestroyed()) {
+    if (show) {
+      suggestionsBoxWindow.show();
+    } else {
+      suggestionsBoxWindow.hide();
+    }
+  }
+
+  // Show/hide dot window (opposite of suggestions box)
+  if (dotWindow && !dotWindow.isDestroyed()) {
+    if (show) {
+      dotWindow.hide();
+    } else {
+      dotWindow.show();
+    }
   }
 });
 
-ipcMain.on("move-suggestions-window", (event, x, y) => {
-  if (suggestionsWindow && !suggestionsWindow.isDestroyed()) {
-    suggestionsWindow.setPosition(Math.round(x), Math.round(y));
+ipcMain.on("move-dot-window", (event, x, y) => {
+  if (dotWindow && !dotWindow.isDestroyed()) {
+    dotWindow.setPosition(Math.round(x), Math.round(y));
+  }
+});
+
+ipcMain.on("set-dot-mouse-events", (event, ignore) => {
+  if (dotWindow && !dotWindow.isDestroyed()) {
+    dotWindow.setIgnoreMouseEvents(ignore, { forward: true });
+  }
+});
+
+ipcMain.on("move-suggestions-box-window", (event, x, y) => {
+  if (suggestionsBoxWindow && !suggestionsBoxWindow.isDestroyed()) {
+    suggestionsBoxWindow.setPosition(Math.round(x), Math.round(y));
+  }
+});
+
+ipcMain.on("move-force-button-window", (event, x, y) => {
+  if (forceButtonWindow && !forceButtonWindow.isDestroyed()) {
+    forceButtonWindow.setPosition(Math.round(x), Math.round(y));
   }
 });
 
@@ -1294,4 +1324,9 @@ ipcMain.on("toggle-global-vision", (event, enabled) => {
     visionScheduler.setGlobalVisionEnabled(enabled);
   }
 });
+
+ipcMain.on('dot-drag', (evt, phase) => {
+  // Removed - type: 'toolbar' handles transparency correctly
+})
+
 
