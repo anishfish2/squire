@@ -43,7 +43,9 @@ export default defineConfig({
           settings: resolve(__dirname, 'src/renderer/settings/index.html'),
           dot: resolve(__dirname, 'src/renderer/dot/index.html'),
           'suggestions-box': resolve(__dirname, 'src/renderer/suggestions-box/index.html'),
-          'force-button': resolve(__dirname, 'src/renderer/force-button/index.html')
+          'force-button': resolve(__dirname, 'src/renderer/force-button/index.html'),
+          'llm-dot': resolve(__dirname, 'src/renderer/llm-dot/index.html'),
+          'llm-chat': resolve(__dirname, 'src/renderer/llm-chat/index.html')
         }
       }
     },

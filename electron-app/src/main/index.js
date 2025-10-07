@@ -19,6 +19,8 @@ let dotWindow;
 let suggestionsBoxWindow;
 let forceButtonWindow;
 let settingsWindow;
+let llmDotWindow;
+let llmChatWindow;
 let ocrManager;
 let appTracker;
 let activityTracker;
@@ -618,10 +620,104 @@ function createForceButtonWindow() {
   return forceButtonWindow;
 }
 
+function createLLMDotWindow() {
+  const { width } = screen.getPrimaryDisplay().workAreaSize;
+
+  llmDotWindow = new BrowserWindow({
+    width: 56,
+    height: 56,
+    x: width - 82,
+    y: 150,  // Position below the force button
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    hasShadow: false,
+    resizable: false,
+    movable: true,
+    skipTaskbar: true,
+    acceptFirstMouse: true,
+    fullscreenable: false,
+    alwaysOnTop: true,
+    type: 'panel',
+    roundedCorners: false,
+    show: false,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+      backgroundThrottling: false,
+    },
+  });
+
+  if (process.env.VITE_DEV_SERVER_URL) {
+    llmDotWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}/llm-dot/index.html`);
+  } else {
+    llmDotWindow.loadFile(path.join(__dirname, '../renderer/llm-dot/index.html'));
+  }
+
+  llmDotWindow.once("ready-to-show", () => {
+    llmDotWindow.setAlwaysOnTop(true, "screen-saver");
+    llmDotWindow.setVisibleOnAllWorkspaces(true, {
+      visibleOnFullScreen: true,
+      skipTransformProcessType: true,
+    });
+    llmDotWindow.show();
+  });
+
+  llmDotWindow.webContents.on('did-finish-load', () => {
+    llmDotWindow.webContents.insertCSS('html, body, * { background: transparent !important; background-color: transparent !important; }');
+  });
+
+  return llmDotWindow;
+}
+
+function createLLMChatWindow() {
+  const { width } = screen.getPrimaryDisplay().workAreaSize;
+
+  llmChatWindow = new BrowserWindow({
+    width: 500,
+    height: 600,
+    x: width - 520,
+    y: 150,  // Position next to the LLM dot
+    frame: false,
+    transparent: true,
+    resizable: true,
+    movable: true,
+    skipTaskbar: true,
+    focusable: true,
+    backgroundColor: '#00000000',
+    vibrancy: 'under-window',
+    fullscreenable: false,
+    alwaysOnTop: true,
+    show: false,  // Hidden by default
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+    },
+  });
+
+  if (process.env.VITE_DEV_SERVER_URL) {
+    llmChatWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}/llm-chat/index.html`);
+  } else {
+    llmChatWindow.loadFile(path.join(__dirname, '../renderer/llm-chat/index.html'));
+  }
+
+  llmChatWindow.once("ready-to-show", () => {
+    llmChatWindow.setAlwaysOnTop(true, "screen-saver");
+    llmChatWindow.setVisibleOnAllWorkspaces(true, {
+      visibleOnFullScreen: true,
+      skipTransformProcessType: true,
+    });
+  });
+
+  return llmChatWindow;
+}
+
 function createSuggestionsWindow() {
   createDotWindow();
   createSuggestionsBoxWindow();
   createForceButtonWindow();
+  createLLMDotWindow();
+  createLLMChatWindow();
 
   return dotWindow;
 }
@@ -1208,6 +1304,40 @@ ipcMain.on("move-suggestions-box-window", (event, x, y) => {
 ipcMain.on("move-force-button-window", (event, x, y) => {
   if (forceButtonWindow && !forceButtonWindow.isDestroyed()) {
     forceButtonWindow.setPosition(Math.round(x), Math.round(y));
+  }
+});
+
+// LLM Chat window handlers
+ipcMain.on("toggle-llm-chat", (event, show) => {
+  console.log('🔄 [MAIN] Toggle LLM chat:', show);
+  if (llmChatWindow && !llmChatWindow.isDestroyed()) {
+    if (show) {
+      llmChatWindow.show();
+    } else {
+      llmChatWindow.hide();
+    }
+  }
+});
+
+ipcMain.on("move-llm-dot-window", (event, x, y) => {
+  if (llmDotWindow && !llmDotWindow.isDestroyed()) {
+    llmDotWindow.setPosition(Math.round(x), Math.round(y));
+  }
+});
+
+ipcMain.on("move-llm-chat-window", (event, x, y) => {
+  if (llmChatWindow && !llmChatWindow.isDestroyed()) {
+    llmChatWindow.setPosition(Math.round(x), Math.round(y));
+  }
+});
+
+ipcMain.on('llm-dot-drag', (evt, phase) => {
+  if (!llmDotWindow || llmDotWindow.isDestroyed()) return;
+
+  if (phase === 'start') {
+    llmDotWindow.setIgnoreMouseEvents(false);
+  } else if (phase === 'end') {
+    llmDotWindow.setIgnoreMouseEvents(false);
   }
 });
 
