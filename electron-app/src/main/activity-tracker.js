@@ -30,6 +30,7 @@ class ComprehensiveActivityTracker {
     this.lastMousePosition = { x: 0, y: 0 };
     this.mouseMovementBuffer = [];
     this.lastActivityTime = Date.now();
+    this.visionScheduler = null; // Will be set after construction
 
     this.pauseDetection = {
       isInPause: false,
@@ -53,6 +54,10 @@ class ComprehensiveActivityTracker {
       windowSwitches: 0,
       sessionStart: Date.now(),
     };
+  }
+
+  setVisionScheduler(visionScheduler) {
+    this.visionScheduler = visionScheduler;
   }
 
   async startTracking() {
@@ -109,6 +114,11 @@ class ComprehensiveActivityTracker {
   }
 
   async checkActiveApp() {
+    // Skip if vision pipeline is disabled
+    if (this.visionScheduler && !this.visionScheduler.globalVisionEnabled) {
+      return;
+    }
+
     try {
       const activeWindow = await activeWin();
       if (!activeWindow) return;
@@ -161,6 +171,11 @@ class ComprehensiveActivityTracker {
   }
 
   trackMousePosition() {
+    // Skip if vision pipeline is disabled
+    if (this.visionScheduler && !this.visionScheduler.globalVisionEnabled) {
+      return;
+    }
+
     try {
       const currentPos = screen.getCursorScreenPoint();
 
@@ -299,6 +314,12 @@ class ComprehensiveActivityTracker {
   }
 
   triggerSmartOCR(reason) {
+    // Check if vision is globally enabled before triggering OCR
+    if (this.visionScheduler && !this.visionScheduler.globalVisionEnabled) {
+      console.log('🚫 [ActivityTracker] Vision pipeline disabled, skipping OCR trigger');
+      return;
+    }
+
     if (global.smartOCRScheduler && global.smartOCRScheduler.triggerImmediateOCR) {
       global.smartOCRScheduler.triggerImmediateOCR({
         appName: this.currentApp,
@@ -333,6 +354,11 @@ class ComprehensiveActivityTracker {
   }
 
   addEvent(type, data) {
+    // Skip adding events if vision pipeline is disabled
+    if (this.visionScheduler && !this.visionScheduler.globalVisionEnabled) {
+      return;
+    }
+
     const event = {
       type: type,
       timestamp: data.timestamp || Date.now(),
@@ -356,6 +382,13 @@ class ComprehensiveActivityTracker {
 
   async flushEventBuffer() {
     if (this.eventBuffer.length === 0) return;
+
+    // Check if vision is globally enabled before sending activity data
+    if (this.visionScheduler && !this.visionScheduler.globalVisionEnabled) {
+      console.log('🚫 [ActivityTracker] Vision pipeline disabled, clearing activity buffer without sending');
+      this.eventBuffer = [];
+      return;
+    }
 
     const events = [...this.eventBuffer];
     this.eventBuffer = [];

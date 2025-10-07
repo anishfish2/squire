@@ -21,6 +21,7 @@ let forceButtonWindow;
 let settingsWindow;
 let llmDotWindow;
 let llmChatWindow;
+let visionToggleWindow;
 let ocrManager;
 let appTracker;
 let activityTracker;
@@ -84,8 +85,13 @@ class SmartOCRScheduler {
     this.minTimeBetweenOCR = 5000;
     this.fallbackInterval = 30000;
     this.lastAppInfo = null;
+    this.visionScheduler = null; // Will be set after construction
 
     this.startFallbackTimer();
+  }
+
+  setVisionScheduler(visionScheduler) {
+    this.visionScheduler = visionScheduler;
   }
 
   setProcessCallback(callback) {
@@ -93,6 +99,12 @@ class SmartOCRScheduler {
   }
 
   scheduleOCR(appInfo, reason = "app_switch") {
+    // Check if vision is globally enabled
+    if (this.visionScheduler && !this.visionScheduler.globalVisionEnabled) {
+      console.log('🚫 [SmartOCRScheduler] Vision pipeline disabled, skipping OCR schedule');
+      return;
+    }
+
     if (this.timeout) {
       clearTimeout(this.timeout);
     }
@@ -114,6 +126,12 @@ class SmartOCRScheduler {
   }
 
   executeOCR(appInfo, reason) {
+    // Check if vision is globally enabled
+    if (this.visionScheduler && !this.visionScheduler.globalVisionEnabled) {
+      console.log('🚫 [SmartOCRScheduler] Vision pipeline disabled, skipping OCR execution');
+      return;
+    }
+
     if (this.pendingApp && this.processCallback) {
       this.lastOCRTime = Date.now();
       this.lastAppInfo = appInfo;
@@ -123,6 +141,11 @@ class SmartOCRScheduler {
 
   startFallbackTimer() {
     this.fallbackTimeout = setInterval(() => {
+      // Check if vision is globally enabled
+      if (this.visionScheduler && !this.visionScheduler.globalVisionEnabled) {
+        return;
+      }
+
       const now = Date.now();
       if (now - this.lastOCRTime > this.fallbackInterval && this.lastAppInfo) {
         this.executeOCR(this.lastAppInfo, 'fallback_timer');
@@ -131,6 +154,12 @@ class SmartOCRScheduler {
   }
 
   triggerImmediateOCR(appInfo, reason) {
+    // Check if vision is globally enabled
+    if (this.visionScheduler && !this.visionScheduler.globalVisionEnabled) {
+      console.log('🚫 [SmartOCRScheduler] Vision pipeline disabled, skipping immediate OCR trigger');
+      return;
+    }
+
     const now = Date.now();
     if (now - this.lastOCRTime < 3000) {
       return;
@@ -169,6 +198,11 @@ class OCRBatchManager {
     this.currentSequenceId = null;
     this.pendingOCRJobs = new Map();
     this.isProcessing = false;
+    this.visionScheduler = null; // Will be set after construction
+  }
+
+  setVisionScheduler(visionScheduler) {
+    this.visionScheduler = visionScheduler;
   }
 
   async queueOCRJob(jobId, appContext, reason = "unknown") {
@@ -258,22 +292,39 @@ class OCRBatchManager {
   async processBatch() {
     if (this.pendingBatch.length === 0) return;
 
+    // Check if vision is globally enabled before processing batch
+    if (this.visionScheduler && !this.visionScheduler.globalVisionEnabled) {
+      console.log('🚫 [OCRBatchManager] Vision pipeline disabled, clearing batch without processing');
+      this.pendingBatch = [];
+      this.pendingOCRJobs.clear();
+      this.currentSequenceId = null;
+      if (this.batchTimeout) {
+        clearTimeout(this.batchTimeout);
+        this.batchTimeout = null;
+      }
+      return;
+    }
+
     const batch = [...this.pendingBatch];
     const sequenceId = this.currentSequenceId;
 
-    this.pendingBatch = [];
-    this.pendingOCRJobs.clear();
-    this.currentSequenceId = null;
+    // DON'T clear batch yet - wait for successful LLM call
     if (this.batchTimeout) {
       clearTimeout(this.batchTimeout);
       this.batchTimeout = null;
     }
 
-
     try {
       await this.sendBatchToLLM(batch, sequenceId);
+
+      // Only clear batch AFTER successful LLM call
+      this.pendingBatch = [];
+      this.pendingOCRJobs.clear();
+      this.currentSequenceId = null;
+      console.log('✅ [OCRBatchManager] Batch cleared after successful LLM processing');
     } catch (error) {
       console.error('❌ Error processing batch:', error);
+      // Don't clear batch on error - allow retry or manual clear
     }
   }
 
@@ -309,6 +360,11 @@ class OCRBatchManager {
     if (aiAssistant) {
       const suggestions = await aiAssistant.processBatchRequest(batchRequest);
 
+      // Check if vision is still enabled before showing suggestions
+      if (this.visionScheduler && !this.visionScheduler.globalVisionEnabled) {
+        console.log('🚫 [OCRBatchManager] Vision pipeline disabled, not showing suggestions');
+        return;
+      }
 
       if (suggestions && suggestions.length > 0) {
         console.log(`🤖 [AI] Received ${suggestions.length} suggestions`);
@@ -715,12 +771,63 @@ function createLLMChatWindow() {
   return llmChatWindow;
 }
 
+function createVisionToggleWindow() {
+  const { width } = screen.getPrimaryDisplay().workAreaSize;
+
+  visionToggleWindow = new BrowserWindow({
+    width: 56,
+    height: 56,
+    x: width - 82,
+    y: 210,  // Position below the LLM dot
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    hasShadow: false,
+    resizable: false,
+    movable: true,
+    skipTaskbar: true,
+    acceptFirstMouse: true,
+    fullscreenable: false,
+    alwaysOnTop: true,
+    type: 'panel',
+    roundedCorners: false,
+    show: false,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+      backgroundThrottling: false,
+    },
+  });
+
+  if (process.env.VITE_DEV_SERVER_URL) {
+    visionToggleWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}/vision-toggle/index.html`);
+  } else {
+    visionToggleWindow.loadFile(path.join(__dirname, '../renderer/vision-toggle/index.html'));
+  }
+
+  visionToggleWindow.once("ready-to-show", () => {
+    visionToggleWindow.setAlwaysOnTop(true, "screen-saver");
+    visionToggleWindow.setVisibleOnAllWorkspaces(true, {
+      visibleOnFullScreen: true,
+      skipTransformProcessType: true,
+    });
+    visionToggleWindow.show();
+  });
+
+  visionToggleWindow.webContents.on('did-finish-load', () => {
+    visionToggleWindow.webContents.insertCSS('html, body, * { background: transparent !important; background-color: transparent !important; }');
+  });
+
+  return visionToggleWindow;
+}
+
 function createSuggestionsWindow() {
   createDotWindow();
   createSuggestionsBoxWindow();
   createForceButtonWindow();
   createLLMDotWindow();
   createLLMChatWindow();
+  createVisionToggleWindow();
 
   return dotWindow;
 }
@@ -824,6 +931,12 @@ async function processAppOCR(appInfo, reason = "app_switch") {
 }
 
 async function processKeystrokeSequence(sequenceData) {
+  // Check if vision is globally enabled before processing keystrokes
+  if (visionScheduler && !visionScheduler.globalVisionEnabled) {
+    console.log('🚫 [KeystrokeCollector] Vision pipeline disabled, skipping keystroke analysis');
+    return;
+  }
+
   try {
 
     const response = await fetch('http://127.0.0.1:8000/api/ai/keystroke-analysis', {
@@ -1007,6 +1120,18 @@ function setupPipelines() {
   // Initialize VisionScheduler
   visionScheduler = new VisionScheduler('http://127.0.0.1:8000', currentUserId, currentSessionId);
   visionScheduler.startScheduling();
+
+  // Pass visionScheduler reference to activityTracker so it can check global vision state
+  activityTracker.setVisionScheduler(visionScheduler);
+
+  // Pass visionScheduler reference to ocrBatchManager so it can check global vision state
+  ocrBatchManager.setVisionScheduler(visionScheduler);
+
+  // Pass visionScheduler reference to ocrManager so it can check global vision state
+  ocrManager.setVisionScheduler(visionScheduler);
+
+  // Pass visionScheduler reference to smartOCRScheduler so it can check global vision state
+  smartOCRScheduler.setVisionScheduler(visionScheduler);
 
   appTracker = new ActiveAppTracker(ocrManager, async (appInfo) => {
     try {
@@ -1358,6 +1483,13 @@ ipcMain.on('llm-dot-drag', (evt, phase) => {
   }
 });
 
+// Vision toggle window handlers
+ipcMain.on("move-vision-toggle-window", (event, x, y) => {
+  if (visionToggleWindow && !visionToggleWindow.isDestroyed()) {
+    visionToggleWindow.setPosition(Math.round(x), Math.round(y));
+  }
+});
+
 // Force suggestion request handler
 ipcMain.handle("force-suggestion-request", async (event) => {
   console.log('🔍 Force suggestion request received');
@@ -1466,9 +1598,13 @@ ipcMain.on("update-app-preference", async (event, { appName, updates }) => {
 });
 
 ipcMain.on("toggle-global-vision", (event, enabled) => {
+  console.log(`🔄 [MAIN] Toggle global vision: ${enabled}`);
 
   if (visionScheduler) {
     visionScheduler.setGlobalVisionEnabled(enabled);
+    console.log(`✅ [MAIN] Vision scheduler globalVisionEnabled set to: ${enabled}`);
+  } else {
+    console.error('❌ [MAIN] Vision scheduler not initialized!');
   }
 });
 

@@ -16,9 +16,14 @@ class OCRManager {
     this.wsManager = new WebSocketManager();
     this.pendingJobs = new Map();
     this.userId = null;
+    this.visionScheduler = null; // Will be set after construction
 
     this._setupWebSocketHandlers();
 
+  }
+
+  setVisionScheduler(visionScheduler) {
+    this.visionScheduler = visionScheduler;
   }
 
   _setupWebSocketHandlers() {
@@ -54,6 +59,16 @@ class OCRManager {
   async captureAndRecognize(appContext = {}, userId = null) {
     if (this.isProcessing) {
       return [];
+    }
+
+    // Check if vision is globally enabled
+    if (this.visionScheduler) {
+      if (!this.visionScheduler.globalVisionEnabled) {
+        console.log('🚫 [OCRManager] Vision pipeline disabled, skipping OCR capture');
+        return [];
+      }
+    } else {
+      console.warn('⚠️ [OCRManager] visionScheduler not set, allowing OCR to proceed');
     }
 
     this.isProcessing = true;
@@ -110,6 +125,16 @@ class OCRManager {
   async captureAndQueueOCR(appContext = {}, userId = null) {
     if (this.isProcessing) {
       return null;
+    }
+
+    // Check if vision is globally enabled
+    if (this.visionScheduler) {
+      if (!this.visionScheduler.globalVisionEnabled) {
+        console.log('🚫 [OCRManager] Vision pipeline disabled, skipping OCR queue');
+        return null;
+      }
+    } else {
+      console.warn('⚠️ [OCRManager] visionScheduler not set, allowing OCR queue to proceed');
     }
 
     this.isProcessing = true;

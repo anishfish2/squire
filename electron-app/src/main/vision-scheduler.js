@@ -68,11 +68,15 @@ class VisionScheduler {
    * Set global vision feature toggle
    */
   setGlobalVisionEnabled(enabled) {
+    console.log(`📸 [VisionScheduler] setGlobalVisionEnabled called: ${enabled}`);
     this.globalVisionEnabled = enabled;
+    console.log(`📸 [VisionScheduler] globalVisionEnabled is now: ${this.globalVisionEnabled}`);
 
     if (!enabled && this.captureInterval) {
+      console.log('📸 [VisionScheduler] Stopping scheduling because vision is disabled');
       this.stopScheduling();
     } else if (enabled && !this.captureInterval) {
+      console.log('📸 [VisionScheduler] Starting scheduling because vision is enabled');
       this.scheduleNextCapture();
     }
   }
