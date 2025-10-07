@@ -692,6 +692,9 @@ function createLLMChatWindow() {
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
+      enableWebSQL: false,
+      // Explicitly enable standard editing features
+      spellcheck: true,
     },
   });
 
@@ -1113,6 +1116,20 @@ app.whenReady().then(async () => {
         },
         { type: 'separator' },
         { role: 'quit' }
+      ]
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'pasteAndMatchStyle' },
+        { role: 'delete' },
+        { role: 'selectAll' }
       ]
     }
   ];

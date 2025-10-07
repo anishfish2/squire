@@ -230,6 +230,20 @@ class ComprehensiveActivityTracker {
   }
 
   startKeystrokeTracking() {
+    // DISABLED: This was blocking critical system shortcuts (Cmd+C, Cmd+V, etc.)
+    // Keystroke tracking is now handled by keystroke-collector.js which listens
+    // passively without intercepting shortcuts. That collector already updates
+    // activity stats, so this globalShortcut registration is redundant and harmful.
+
+    // The keystroke-collector.js handles:
+    // - All keystroke detection (without blocking)
+    // - Activity tracking
+    // - Sending events to /api/ai/keystroke-analysis endpoint
+
+    // If you need to track specific shortcuts without blocking them, use the
+    // keystroke-collector.js events instead of globalShortcut.register()
+
+    /* COMMENTED OUT - THIS BLOCKS SYSTEM SHORTCUTS
     const keyToTrack = [
       "CommandOrControl+C",
       "CommandOrControl+V",
@@ -250,10 +264,6 @@ class ComprehensiveActivityTracker {
     keyToTrack.forEach((key) => {
       try {
         globalShortcut.register(key, () => {
-          // NOTE: Keystroke events are now handled by keystroke-collector.js
-          // and sent to /api/ai/keystroke-analysis endpoint
-          // We only track stats here, not send events to user_events table
-
           this.sessionStats.keystrokes++;
           this.lastActivityTime = Date.now();
           this.updateActivityForPauseDetection();
@@ -261,6 +271,7 @@ class ComprehensiveActivityTracker {
       } catch (error) {
       }
     });
+    */
   }
 
   updateActivityForPauseDetection() {

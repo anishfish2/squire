@@ -74,8 +74,6 @@ class AnthropicProvider(LLMProvider):
             system_messages = [m for m in messages if m['role'] == 'system']
             conversation_messages = [m for m in messages if m['role'] != 'system']
 
-            system_prompt = system_messages[0]['content'] if system_messages else None
-
             # Map model names to Anthropic format
             model_mapping = {
                 'claude-3-opus': 'claude-3-opus-20240229',
@@ -85,12 +83,18 @@ class AnthropicProvider(LLMProvider):
 
             anthropic_model = model_mapping.get(model, model)
 
-            async with self.client.messages.stream(
-                model=anthropic_model,
-                messages=conversation_messages,
-                system=system_prompt,
-                max_tokens=kwargs.get('max_tokens', 4096),
-            ) as stream:
+            # Build parameters
+            params = {
+                'model': anthropic_model,
+                'messages': conversation_messages,
+                'max_tokens': kwargs.get('max_tokens', 4096),
+            }
+
+            # Only add system if we have system messages
+            if system_messages:
+                params['system'] = system_messages[0]['content']
+
+            async with self.client.messages.stream(**params) as stream:
                 async for text in stream.text_stream:
                     yield text
 
@@ -165,7 +169,12 @@ class LLMService:
 
         provider = self.providers.get(provider_name)
         if not provider:
-            raise ValueError(f"Provider {provider_name} not available. Check API keys.")
+            available = list(self.providers.keys())
+            raise ValueError(
+                f"Provider '{provider_name}' for model '{model}' not available. "
+                f"Available providers: {available}. "
+                f"Check that your API key is set in .env file."
+            )
 
         return provider, provider_name
 

@@ -50,7 +50,8 @@ function LLMChatApp() {
     const userMessage = {
       role: 'user',
       content: input.trim(),
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      model: selectedModel
     }
 
     setMessages(prev => [...prev, userMessage])
@@ -64,31 +65,42 @@ function LLMChatApp() {
       role: 'assistant',
       content: '',
       timestamp: new Date().toISOString(),
-      isStreaming: true
+      isStreaming: true,
+      model: selectedModel
     }])
+
+    console.log('📤 Sending message with model:', selectedModel)
 
     try {
       // Create abort controller for cancellation
       abortControllerRef.current = new AbortController()
+
+      const requestBody = {
+        model: selectedModel,
+        messages: [...messages, userMessage].map(m => ({
+          role: m.role,
+          content: m.content
+        })),
+        stream: true
+      }
+
+      console.log('📨 Request:', requestBody)
 
       const response = await fetch('http://localhost:8000/api/chat/stream', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          model: selectedModel,
-          messages: [...messages, userMessage].map(m => ({
-            role: m.role,
-            content: m.content
-          })),
-          stream: true
-        }),
+        body: JSON.stringify(requestBody),
         signal: abortControllerRef.current.signal
       })
 
+      console.log('📥 Response status:', response.status)
+
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
+        const errorText = await response.text()
+        console.error('❌ Error response:', errorText)
+        throw new Error(`HTTP error! status: ${response.status} - ${errorText}`)
       }
 
       const reader = response.body.getReader()
@@ -325,6 +337,10 @@ function ChatMessage({ message }) {
   const isUser = message.role === 'user'
   const isError = message.isError
 
+  // Get model name for display
+  const modelInfo = MODELS.find(m => m.id === message.model) || MODELS.find(m => m.id === 'gpt-4')
+  const displayName = isUser ? 'You' : `${modelInfo?.name || 'Assistant'}`
+
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div
@@ -337,7 +353,10 @@ function ChatMessage({ message }) {
         }`}
       >
         <div className="text-xs opacity-60 mb-1">
-          {isUser ? 'You' : MODELS.find(m => m.id === 'gpt-4')?.name || 'Assistant'}
+          {displayName}
+          {message.model && !isUser && (
+            <span className="ml-1 opacity-50">({message.model})</span>
+          )}
         </div>
         <div className="text-sm whitespace-pre-wrap break-words">
           {message.content}

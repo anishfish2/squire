@@ -34,6 +34,8 @@ class ChatRequest(BaseModel):
 async def generate_stream(request: ChatRequest):
     """Generate Server-Sent Events stream for chat completion."""
     try:
+        logger.info(f"🚀 Starting stream for model: {request.model}")
+
         # Convert Pydantic models to dicts
         messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
 
@@ -45,6 +47,7 @@ async def generate_stream(request: ChatRequest):
             kwargs['max_tokens'] = request.max_tokens
 
         # Stream the response
+        chunk_count = 0
         async for chunk in llm_service.stream_chat_completion(
             messages=messages,
             model=request.model,
@@ -52,18 +55,21 @@ async def generate_stream(request: ChatRequest):
         ):
             if 'error' in chunk:
                 # Send error event
+                logger.error(f"❌ Stream error: {chunk['error']}")
                 yield f"data: {json.dumps({'error': chunk['error']})}\n\n"
                 break
             elif 'done' in chunk:
                 # Send completion event
+                logger.info(f"✅ Stream completed. Total chunks: {chunk_count}")
                 yield f"data: [DONE]\n\n"
                 break
             elif 'content' in chunk:
                 # Send content chunk
+                chunk_count += 1
                 yield f"data: {json.dumps({'content': chunk['content']})}\n\n"
 
     except Exception as e:
-        logger.error(f"Error in generate_stream: {e}")
+        logger.error(f"❌ Error in generate_stream: {e}", exc_info=True)
         yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
 
