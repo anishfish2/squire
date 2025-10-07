@@ -46,7 +46,8 @@ export default defineConfig({
           'force-button': resolve(__dirname, 'src/renderer/force-button/index.html'),
           'llm-dot': resolve(__dirname, 'src/renderer/llm-dot/index.html'),
           'llm-chat': resolve(__dirname, 'src/renderer/llm-chat/index.html'),
-          'vision-toggle': resolve(__dirname, 'src/renderer/vision-toggle/index.html')
+          'vision-toggle': resolve(__dirname, 'src/renderer/vision-toggle/index.html'),
+          'hub-dot': resolve(__dirname, 'src/renderer/hub-dot/index.html')
         }
       }
     },

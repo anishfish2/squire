@@ -22,6 +22,7 @@ let settingsWindow;
 let llmDotWindow;
 let llmChatWindow;
 let visionToggleWindow;
+let hubDotWindow;
 let ocrManager;
 let appTracker;
 let activityTracker;
@@ -39,6 +40,10 @@ let currentSessionId = null;
 // Track detected apps for settings UI
 let detectedApps = new Set();
 let appPreferences = new Map(); // Cache of app preferences
+
+// Hub expansion state
+let isHubExpanded = false;
+let collapsedPositions = new Map(); // Store collapsed positions for each dot
 
 // For macOS transparency to work:
 // - Keep GPU and hardware acceleration ENABLED
@@ -583,10 +588,11 @@ function createDotWindow() {
       skipTransformProcessType: true,
     });
     dotWindow.show();
+    dotWindow.webContents.openDevTools({ mode: 'detach' });
   });
 
   dotWindow.webContents.on('did-finish-load', () => {
-    dotWindow.webContents.insertCSS('html, body, * { background: transparent !important; background-color: transparent !important; }');
+    dotWindow.webContents.insertCSS('html, body, #root { background: transparent !important; background-color: transparent !important; }');
   });
 
   return dotWindow;
@@ -638,10 +644,10 @@ function createForceButtonWindow() {
   const { width } = screen.getPrimaryDisplay().workAreaSize;
 
   forceButtonWindow = new BrowserWindow({
-    width: 32,  // 8 * 4 (2rem)
-    height: 32,
-    x: width - 62,  // right-[30px]
-    y: 90,  // top-[90px]
+    width: 56,
+    height: 56,
+    x: width - 82,
+    y: 90,
     frame: false,
     transparent: true,
     backgroundColor: '#00000000', // Fully transparent
@@ -671,6 +677,7 @@ function createForceButtonWindow() {
       visibleOnFullScreen: true,
       skipTransformProcessType: true,
     });
+    // forceButtonWindow.webContents.openDevTools({ mode: 'detach' });
   });
 
   return forceButtonWindow;
@@ -717,10 +724,11 @@ function createLLMDotWindow() {
       skipTransformProcessType: true,
     });
     llmDotWindow.show();
+    llmDotWindow.webContents.openDevTools({ mode: 'detach' });
   });
 
   llmDotWindow.webContents.on('did-finish-load', () => {
-    llmDotWindow.webContents.insertCSS('html, body, * { background: transparent !important; background-color: transparent !important; }');
+    llmDotWindow.webContents.insertCSS('html, body, #root { background: transparent !important; background-color: transparent !important; }');
   });
 
   return llmDotWindow;
@@ -812,13 +820,65 @@ function createVisionToggleWindow() {
       skipTransformProcessType: true,
     });
     visionToggleWindow.show();
+    // visionToggleWindow.webContents.openDevTools({ mode: 'detach' });
   });
 
   visionToggleWindow.webContents.on('did-finish-load', () => {
-    visionToggleWindow.webContents.insertCSS('html, body, * { background: transparent !important; background-color: transparent !important; }');
+    visionToggleWindow.webContents.insertCSS('html, body, #root { background: transparent !important; background-color: transparent !important; }');
   });
 
   return visionToggleWindow;
+}
+
+function createHubDotWindow() {
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+
+  hubDotWindow = new BrowserWindow({
+    width: 60,
+    height: 60,
+    x: width - 90,
+    y: 30,  // Top position - main hub
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    hasShadow: false,
+    resizable: false,
+    movable: true,
+    skipTaskbar: true,
+    acceptFirstMouse: true,
+    fullscreenable: false,
+    alwaysOnTop: true,
+    type: 'panel',
+    roundedCorners: false,
+    show: false,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+      backgroundThrottling: false,
+    },
+  });
+
+  if (process.env.VITE_DEV_SERVER_URL) {
+    hubDotWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}/hub-dot/index.html`);
+  } else {
+    hubDotWindow.loadFile(path.join(__dirname, '../renderer/hub-dot/index.html'));
+  }
+
+  hubDotWindow.once("ready-to-show", () => {
+    hubDotWindow.setAlwaysOnTop(true, "screen-saver");
+    hubDotWindow.setVisibleOnAllWorkspaces(true, {
+      visibleOnFullScreen: true,
+      skipTransformProcessType: true,
+    });
+    hubDotWindow.show();
+    // hubDotWindow.webContents.openDevTools({ mode: 'detach' });
+  });
+
+  hubDotWindow.webContents.on('did-finish-load', () => {
+    hubDotWindow.webContents.insertCSS('html, body, #root { background: transparent !important; background-color: transparent !important; }');
+  });
+
+  return hubDotWindow;
 }
 
 function createSuggestionsWindow() {
@@ -828,6 +888,13 @@ function createSuggestionsWindow() {
   createLLMDotWindow();
   createLLMChatWindow();
   createVisionToggleWindow();
+  createHubDotWindow();
+
+  // Initially hide all dots (they'll be collapsed behind the hub)
+  if (dotWindow) dotWindow.hide();
+  if (forceButtonWindow) forceButtonWindow.hide();
+  if (llmDotWindow) llmDotWindow.hide();
+  if (visionToggleWindow) visionToggleWindow.hide();
 
   return dotWindow;
 }
@@ -936,6 +1003,8 @@ async function processKeystrokeSequence(sequenceData) {
     console.log('🚫 [KeystrokeCollector] Vision pipeline disabled, skipping keystroke analysis');
     return;
   }
+
+  console.log(`📤 [KeystrokeCollector] Sending keystroke analysis (Vision: ${visionScheduler ? visionScheduler.globalVisionEnabled : 'unknown'})`);
 
   try {
 
@@ -1598,18 +1667,162 @@ ipcMain.on("update-app-preference", async (event, { appName, updates }) => {
 });
 
 ipcMain.on("toggle-global-vision", (event, enabled) => {
-  console.log(`🔄 [MAIN] Toggle global vision: ${enabled}`);
+  console.log(`🔄 [MAIN] Toggle global vision received: ${enabled}`);
+  console.log(`🔄 [MAIN] Current visionScheduler state: ${visionScheduler ? visionScheduler.globalVisionEnabled : 'undefined'}`);
 
   if (visionScheduler) {
     visionScheduler.setGlobalVisionEnabled(enabled);
-    console.log(`✅ [MAIN] Vision scheduler globalVisionEnabled set to: ${enabled}`);
+    console.log(`✅ [MAIN] Vision scheduler globalVisionEnabled now: ${visionScheduler.globalVisionEnabled}`);
+
+    // Broadcast state change to all vision toggle windows
+    if (visionToggleWindow && !visionToggleWindow.isDestroyed()) {
+      visionToggleWindow.webContents.send('vision-state-changed', enabled);
+    }
   } else {
     console.error('❌ [MAIN] Vision scheduler not initialized!');
   }
 });
 
+// Handler to get current vision state
+ipcMain.handle("get-vision-state", (event) => {
+  const currentState = visionScheduler ? visionScheduler.globalVisionEnabled : true;
+  console.log(`📊 [MAIN] Vision state requested: ${currentState}`);
+  return currentState;
+});
+
 ipcMain.on('dot-drag', (evt, phase) => {
   // Removed - type: 'toolbar' handles transparency correctly
 })
+
+// Hub expansion/collapse logic
+function animateWindowToPosition(window, targetX, targetY, duration = 300) {
+  if (!window || window.isDestroyed()) return Promise.resolve();
+
+  return new Promise((resolve) => {
+    const startBounds = window.getBounds();
+    const startTime = Date.now();
+
+    const animate = () => {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+
+      // Ease-out cubic easing
+      const easing = 1 - Math.pow(1 - progress, 3);
+
+      const currentX = Math.round(startBounds.x + (targetX - startBounds.x) * easing);
+      const currentY = Math.round(startBounds.y + (targetY - startBounds.y) * easing);
+
+      window.setBounds({
+        x: currentX,
+        y: currentY,
+        width: startBounds.width,
+        height: startBounds.height
+      });
+
+      if (progress < 1) {
+        setTimeout(animate, 16); // ~60fps
+      } else {
+        resolve();
+      }
+    };
+
+    animate();
+  });
+}
+
+async function expandHub() {
+  if (!hubDotWindow || hubDotWindow.isDestroyed()) return;
+
+  isHubExpanded = true;
+
+  // Get hub position
+  const hubBounds = hubDotWindow.getBounds();
+  const hubCenterX = hubBounds.x;
+  const spacing = 70; // Space between dots
+
+  // Define dots to expand and their order
+  const dotsToExpand = [
+    { window: visionToggleWindow, offset: 1 },
+    { window: llmDotWindow, offset: 2 },
+    { window: forceButtonWindow, offset: 3 },
+    { window: dotWindow, offset: 4 }
+  ];
+
+  // Store collapsed positions (all at hub position)
+  dotsToExpand.forEach(({ window }) => {
+    if (window && !window.isDestroyed()) {
+      collapsedPositions.set(window, { x: hubCenterX, y: hubBounds.y });
+    }
+  });
+
+  // Animate each dot to its expanded position (vertically below hub)
+  const animations = dotsToExpand.map(({ window, offset }) => {
+    if (!window || window.isDestroyed()) return Promise.resolve();
+
+    const targetY = hubBounds.y + (spacing * offset);
+
+    // Show the window first at hub position if hidden
+    if (!window.isVisible()) {
+      window.setBounds({ x: hubCenterX, y: hubBounds.y, width: window.getBounds().width, height: window.getBounds().height });
+      window.show();
+    }
+
+    return animateWindowToPosition(window, hubCenterX, targetY);
+  });
+
+  await Promise.all(animations);
+
+  // Notify hub window about expansion state
+  if (hubDotWindow && !hubDotWindow.isDestroyed()) {
+    hubDotWindow.webContents.send('hub-expansion-changed', true);
+  }
+}
+
+async function collapseHub() {
+  if (!hubDotWindow || hubDotWindow.isDestroyed()) return;
+
+  isHubExpanded = false;
+
+  // Get hub position
+  const hubBounds = hubDotWindow.getBounds();
+
+  const dotsToCollapse = [
+    visionToggleWindow,
+    llmDotWindow,
+    forceButtonWindow,
+    dotWindow
+  ];
+
+  // Animate all dots back to hub position
+  const animations = dotsToCollapse.map((window) => {
+    if (!window || window.isDestroyed()) return Promise.resolve();
+
+    return animateWindowToPosition(window, hubBounds.x, hubBounds.y);
+  });
+
+  await Promise.all(animations);
+
+  // Hide all dots after animation
+  dotsToCollapse.forEach((window) => {
+    if (window && !window.isDestroyed()) {
+      window.hide();
+    }
+  });
+
+  // Notify hub window about expansion state
+  if (hubDotWindow && !hubDotWindow.isDestroyed()) {
+    hubDotWindow.webContents.send('hub-expansion-changed', false);
+  }
+}
+
+ipcMain.on('toggle-hub-expansion', async (event, shouldExpand) => {
+  console.log(`🔄 [MAIN] Toggle hub expansion: ${shouldExpand}`);
+
+  if (shouldExpand) {
+    await expandHub();
+  } else {
+    await collapseHub();
+  }
+});
 
 

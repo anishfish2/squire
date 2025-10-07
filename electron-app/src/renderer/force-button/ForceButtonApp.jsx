@@ -1,4 +1,4 @@
-import React, { useRef, useCallback, useEffect } from 'react'
+import React, { useRef, useCallback, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '@/styles.css'
 
@@ -112,29 +112,45 @@ function ForceButtonApp() {
     }
   }, [handleMouseMove, handleMouseUp])
 
+  const [isHovered, setIsHovered] = useState(false)
+
   return (
-    <div className="w-8 h-8 flex items-center justify-center" style={{ background: 'transparent' }}>
+    <div
+      style={{
+        width: '56px',
+        height: '56px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'transparent'
+      }}
+    >
       <button
-        className="w-8 h-8 rounded-full cursor-pointer transition-all duration-200 ease-out flex items-center justify-center hover:scale-105 border-2"
         style={{
+          width: '56px',
+          height: '56px',
+          borderRadius: '50%',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          border: '2px solid rgba(255, 255, 255, 0.3)',
+          background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+          boxShadow: isHovered
+            ? '0 8px 24px rgba(245, 158, 11, 0.4), 0 0 20px rgba(217, 119, 6, 0.3)'
+            : '0 4px 12px rgba(0, 0, 0, 0.15)',
+          transform: isHovered ? 'scale(1.1)' : 'scale(1)',
+          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
           WebkitAppRegion: 'no-drag',
-          background: 'rgba(100, 150, 255, 0.5)',
-          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.4)',
-          borderColor: 'rgba(255, 255, 255, 0.25)'
         }}
         title="Get Suggestions Now"
         onClick={handleForceSuggestion}
         onMouseDown={handleMouseDown}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = 'rgba(120, 170, 255, 0.6)'
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = 'rgba(100, 150, 255, 0.5)'
-        }}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
       >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'rgba(255, 255, 255, 0.9)' }}>
-          <circle cx="11" cy="11" r="8"></circle>
-          <path d="m21 21-4.35-4.35"></path>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.9 }}>
+          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path>
         </svg>
       </button>
     </div>

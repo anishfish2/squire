@@ -73,41 +73,71 @@ function LLMDotApp() {
     }
   }, [handleMouseMove, handleMouseUp])
 
+  const [isHovered, setIsHovered] = useState(false)
+  const dotRef = useRef(null)
+
+  useEffect(() => {
+    if (dotRef.current) {
+      const computedStyle = window.getComputedStyle(dotRef.current)
+      console.log('=== LLM-DOT COMPUTED STYLES ===')
+      console.log('background:', computedStyle.background)
+      console.log('backgroundColor:', computedStyle.backgroundColor)
+      console.log('backgroundImage:', computedStyle.backgroundImage)
+      console.log('width:', computedStyle.width)
+      console.log('height:', computedStyle.height)
+      console.log('borderRadius:', computedStyle.borderRadius)
+      console.log('border:', computedStyle.border)
+      console.log('display:', computedStyle.display)
+      console.log('===========================')
+    }
+  }, [])
+
+  const dotStyle = {
+    width: '56px',
+    height: '56px',
+    borderRadius: '50%',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    border: '2px solid rgba(255, 255, 255, 0.3)',
+    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    boxShadow: isHovered
+      ? '0 8px 24px rgba(102, 126, 234, 0.4), 0 0 20px rgba(118, 75, 162, 0.3)'
+      : '0 4px 12px rgba(0, 0, 0, 0.15)',
+    transform: isHovered ? 'scale(1.1)' : 'scale(1)',
+    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+    WebkitAppRegion: 'no-drag',
+  }
+
   return (
-    <div className="w-14 h-14 flex items-center justify-center bg-transparent">
+    <div
+      style={{
+        width: '56px',
+        height: '56px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'transparent'
+      }}
+    >
       <div
-        className="llm-dot-button"
-        style={{
-          WebkitAppRegion: 'no-drag',
-          width: '40px',
-          height: '40px',
-          borderRadius: '50%',
-          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-          boxShadow: '0 4px 15px rgba(102, 126, 234, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.2)',
-          cursor: 'pointer',
-          transition: 'all 0.2s ease',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: 'white',
-          fontSize: '20px',
-          fontWeight: 'bold',
-        }}
+        ref={dotRef}
+        style={dotStyle}
         onClick={(e) => {
           e.stopPropagation()
           ipcRenderer.send('toggle-llm-chat', true)
         }}
         onMouseDown={handleMouseDown}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.transform = 'scale(1.1)'
-          e.currentTarget.style.boxShadow = '0 6px 20px rgba(102, 126, 234, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.3)'
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.transform = 'scale(1)'
-          e.currentTarget.style.boxShadow = '0 4px 15px rgba(102, 126, 234, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.2)'
-        }}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
       >
-        AI
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.9 }}>
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+          <path d="M8 10h.01"></path>
+          <path d="M12 10h.01"></path>
+          <path d="M16 10h.01"></path>
+        </svg>
       </div>
     </div>
   )

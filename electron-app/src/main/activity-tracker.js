@@ -412,6 +412,14 @@ class ComprehensiveActivityTracker {
   async sendEventsToBackend(events) {
     if (!events || events.length === 0) return;
 
+    // Double-check vision state before sending
+    if (this.visionScheduler && !this.visionScheduler.globalVisionEnabled) {
+      console.log('🚫 [ActivityTracker.sendEventsToBackend] Vision disabled, not sending events');
+      return;
+    }
+
+    console.log(`📤 [ActivityTracker.sendEventsToBackend] Sending ${events.length} events (Vision: ${this.visionScheduler ? this.visionScheduler.globalVisionEnabled : 'unknown'})`);
+
     try {
       const transformedEvents = events.map((event) => ({
         action: event.type,

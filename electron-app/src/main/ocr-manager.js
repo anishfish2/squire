@@ -176,6 +176,14 @@ class OCRManager {
   }
 
   async queueOCRJob(imageBuffer, appContext, userId) {
+    // Double-check vision state before queuing
+    if (this.visionScheduler && !this.visionScheduler.globalVisionEnabled) {
+      console.log('🚫 [OCRManager.queueOCRJob] Vision disabled, not queuing OCR');
+      return null;
+    }
+
+    console.log(`📤 [OCRManager.queueOCRJob] Queuing OCR (Vision: ${this.visionScheduler ? this.visionScheduler.globalVisionEnabled : 'unknown'})`);
+
     try {
       const form = new FormData();
       form.append('file', imageBuffer, 'screenshot.png');

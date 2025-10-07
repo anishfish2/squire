@@ -16,6 +16,27 @@ function VisionToggleApp() {
     clickStartPos: { x: 0, y: 0 }
   })
 
+  // Sync state with backend on mount
+  useEffect(() => {
+    ipcRenderer.invoke('get-vision-state').then(backendState => {
+      console.log('[VisionToggle] Initial backend state:', backendState)
+      setIsEnabled(backendState)
+    }).catch(err => {
+      console.error('[VisionToggle] Failed to get initial state:', err)
+    })
+
+    // Listen for state changes from backend
+    const handleStateChange = (event, newState) => {
+      console.log('[VisionToggle] Backend state changed to:', newState)
+      setIsEnabled(newState)
+    }
+    ipcRenderer.on('vision-state-changed', handleStateChange)
+
+    return () => {
+      ipcRenderer.removeListener('vision-state-changed', handleStateChange)
+    }
+  }, [])
+
   // Handle dragging
   const handleMouseDown = (e) => {
     const dragState = dragStateRef.current
@@ -62,8 +83,10 @@ function VisionToggleApp() {
 
   const toggleVision = () => {
     const newState = !isEnabled
+    console.log(`[VisionToggle] Toggling vision: ${isEnabled} -> ${newState}`)
     setIsEnabled(newState)
     ipcRenderer.send('toggle-global-vision', newState)
+    console.log('[VisionToggle] IPC message sent to backend')
   }
 
   // Add global mouse listeners for dragging

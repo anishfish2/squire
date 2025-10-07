@@ -1,6 +1,4 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-
 import { createRoot } from 'react-dom/client'
 import '@/styles.css'
 
@@ -94,13 +92,57 @@ function DotApp() {
     }
   }, [handleMouseMove, handleMouseUp])
 
+  const [isHovered, setIsHovered] = useState(false)
+  const dotRef = useRef(null)
+
+  useEffect(() => {
+    if (dotRef.current) {
+      const computedStyle = window.getComputedStyle(dotRef.current)
+      console.log('=== DOT COMPUTED STYLES ===')
+      console.log('background:', computedStyle.background)
+      console.log('backgroundColor:', computedStyle.backgroundColor)
+      console.log('backgroundImage:', computedStyle.backgroundImage)
+      console.log('width:', computedStyle.width)
+      console.log('height:', computedStyle.height)
+      console.log('borderRadius:', computedStyle.borderRadius)
+      console.log('border:', computedStyle.border)
+      console.log('display:', computedStyle.display)
+      console.log('===========================')
+    }
+  }, [])
+
+  const dotStyle = {
+    width: '56px',
+    height: '56px',
+    borderRadius: '50%',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    border: '2px solid rgba(255, 255, 255, 0.3)',
+    background: 'linear-gradient(135deg, rgba(100, 150, 255, 1) 0%, rgba(80, 120, 200, 1) 100%)',
+    boxShadow: isHovered
+      ? '0 6px 16px rgba(0, 0, 0, 0.5), inset 0 1px 2px rgba(255, 255, 255, 0.3)'
+      : '0 4px 12px rgba(0, 0, 0, 0.5), inset 0 1px 2px rgba(255, 255, 255, 0.3)',
+    transform: isHovered ? 'scale(1.05)' : 'scale(1)',
+    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+    WebkitAppRegion: 'no-drag',
+  }
+
   return (
-    <div className="w-14 h-14 flex items-center justify-center bg-transparent">
+    <div
+      style={{
+        width: '56px',
+        height: '56px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'transparent'
+      }}
+    >
       <div
-        className="dot-button"
-        style={{
-          WebkitAppRegion: 'no-drag',
-        }}
+        ref={dotRef}
+        style={dotStyle}
         onClick={(e) => {
           e.stopPropagation()
           if (hasSuggestions) {
@@ -108,7 +150,14 @@ function DotApp() {
           }
         }}
         onMouseDown={handleMouseDown}
-      />
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.9 }}>
+          <circle cx="11" cy="11" r="8"></circle>
+          <path d="m21 21-4.35-4.35"></path>
+        </svg>
+      </div>
     </div>
   )
 }
