@@ -827,8 +827,8 @@ function createHubDotWindow() {
   hubDotWindow = new BrowserWindow({
     width: 150,
     height: 150,
-    x: width - 127,
-    y: height - 137,
+    x: width + 50,
+    y: height + 60,
     frame: false,
     transparent: true,
     resizable: false,
@@ -1925,7 +1925,7 @@ ipcMain.on("toggle-global-vision", (event, enabled) => {
 
 // Handler to get current vision state
 ipcMain.handle("get-vision-state", (event) => {
-  const currentState = visionScheduler ? visionScheduler.globalVisionEnabled : true;
+  const currentState = visionScheduler ? visionScheduler.globalVisionEnabled : false;
   console.log(`📊 [MAIN] Vision state requested: ${currentState}`);
   return currentState;
 });

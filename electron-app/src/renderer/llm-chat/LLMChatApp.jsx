@@ -76,7 +76,7 @@ function LLMChatApp() {
   const [isVisible, setIsVisible] = useState(false)
   const [isWindowOpen, setIsWindowOpen] = useState(false)
   const [screenshots, setScreenshots] = useState([])
-  const [visionEnabled, setVisionEnabled] = useState(true)
+  const [visionEnabled, setVisionEnabled] = useState(false)
   const fileInputRef = useRef(null)
 
   // Tab state
@@ -456,7 +456,7 @@ function LLMChatApp() {
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
-      // Cmd+Option+V - Toggle Vision
+      // Cmd+Option+V - Toggle Activity Tracking
       if (e.metaKey && e.altKey && e.key === 'v') {
         e.preventDefault()
         toggleVision()
@@ -743,7 +743,7 @@ function LLMChatApp() {
           </div>
         </div>
         <div className="flex items-center gap-1">
-          <Tooltip text="Vision" hotkey="⌘⌥V" show={hoveredButton === 'vision'}>
+          <Tooltip text="Activity Tracking" hotkey="⌘⌥V" show={hoveredButton === 'vision'}>
             <button
               onClick={toggleVision}
               onMouseEnter={() => setHoveredButton('vision')}

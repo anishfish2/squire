@@ -12,7 +12,7 @@ class VisionScheduler {
     this.isCapturing = false;
     this.currentApp = null;
     this.appPreferences = new Map();
-    this.globalVisionEnabled = true;
+    this.globalVisionEnabled = false;
 
     // Default intervals (in milliseconds)
     this.intervals = {
