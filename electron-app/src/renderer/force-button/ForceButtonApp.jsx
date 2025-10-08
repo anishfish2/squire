@@ -122,8 +122,8 @@ function ForceButtonApp() {
   return (
     <div
       style={{
-        width: '100px',
-        height: '100px',
+        width: '150px',
+        height: '150px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -132,8 +132,8 @@ function ForceButtonApp() {
     >
       <button
         style={{
-          width: '56px',
-          height: '56px',
+          width: '40px',
+          height: '40px',
           borderRadius: '50%',
           cursor: 'pointer',
           display: 'flex',
@@ -145,7 +145,7 @@ function ForceButtonApp() {
             ? '0 8px 24px rgba(245, 158, 11, 0.4), 0 0 20px rgba(217, 119, 6, 0.3)'
             : '0 4px 12px rgba(0, 0, 0, 0.15)',
           transform: isHovered ? 'scale(1.1)' : 'scale(1)',
-          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+          transition: 'all 0.2s ease',
           WebkitAppRegion: 'no-drag',
         }}
         title="Get Suggestions Now"
@@ -160,7 +160,7 @@ function ForceButtonApp() {
           ipcRenderer.send('set-force-button-click-through', true)
         }}
       >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.9 }}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.9 }}>
           <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path>
         </svg>
       </button>

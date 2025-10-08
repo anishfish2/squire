@@ -82,8 +82,8 @@ function LLMDotApp() {
   }, [])
 
   const dotStyle = {
-    width: '56px',
-    height: '56px',
+    width: '40px',
+    height: '40px',
     borderRadius: '50%',
     cursor: 'pointer',
     display: 'flex',
@@ -95,15 +95,15 @@ function LLMDotApp() {
       ? '0 8px 24px rgba(102, 126, 234, 0.4), 0 0 20px rgba(118, 75, 162, 0.3)'
       : '0 4px 12px rgba(0, 0, 0, 0.15)',
     transform: isHovered ? 'scale(1.1)' : 'scale(1)',
-    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+    transition: 'all 0.2s ease',
     WebkitAppRegion: 'no-drag',
   }
 
   return (
     <div
       style={{
-        width: '100px',
-        height: '100px',
+        width: '150px',
+        height: '150px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -127,7 +127,7 @@ function LLMDotApp() {
           ipcRenderer.send('set-llm-dot-click-through', true)
         }}
       >
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.9 }}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.9 }}>
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
           <path d="M8 10h.01"></path>
           <path d="M12 10h.01"></path>

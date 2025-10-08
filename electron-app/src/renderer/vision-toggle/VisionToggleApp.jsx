@@ -103,7 +103,7 @@ function VisionToggleApp() {
   }, [handleMouseMove, handleMouseUp])
 
   return (
-    <div style={{ width: '100px', height: '100px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent' }}>
+    <div style={{ width: '150px', height: '150px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent' }}>
       <div
         className="vision-toggle-button"
         style={{

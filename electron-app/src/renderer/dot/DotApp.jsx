@@ -101,8 +101,8 @@ function DotApp() {
   }, [])
 
   const dotStyle = {
-    width: '56px',
-    height: '56px',
+    width: '40px',
+    height: '40px',
     borderRadius: '50%',
     cursor: 'pointer',
     display: 'flex',
@@ -113,16 +113,16 @@ function DotApp() {
     boxShadow: isHovered
       ? '0 6px 16px rgba(0, 0, 0, 0.5), inset 0 1px 2px rgba(255, 255, 255, 0.3)'
       : '0 4px 12px rgba(0, 0, 0, 0.5), inset 0 1px 2px rgba(255, 255, 255, 0.3)',
-    transform: isHovered ? 'scale(1.05)' : 'scale(1)',
-    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+    transform: isHovered ? 'scale(1.1)' : 'scale(1)',
+    transition: 'all 0.2s ease',
     WebkitAppRegion: 'no-drag',
   }
 
   return (
     <div
       style={{
-        width: '100px',
-        height: '100px',
+        width: '150px',
+        height: '150px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -148,7 +148,7 @@ function DotApp() {
           ipcRenderer.send('set-dot-click-through', true)
         }}
       >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.9 }}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.9 }}>
           <circle cx="11" cy="11" r="8"></circle>
           <path d="m21 21-4.35-4.35"></path>
         </svg>

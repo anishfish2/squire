@@ -551,14 +551,12 @@ function createDotWindow() {
   const { width } = screen.getPrimaryDisplay().workAreaSize;
 
   dotWindow = new BrowserWindow({
-    width: 100,
-    height: 100,
-    x: width - 104,
-    y: 290,
+    width: 150,
+    height: 150,
+    x: width - 127,
+    y: 267,
     frame: false,
     transparent: true,
-    backgroundColor: '#00000000',
-    hasShadow: false,
     resizable: false,
     movable: true,
     skipTaskbar: true,
@@ -566,7 +564,6 @@ function createDotWindow() {
     fullscreenable: false,
     alwaysOnTop: true,
     type: 'panel',
-    roundedCorners: false,
     show: false,
     webPreferences: {
       nodeIntegration: true,
@@ -589,10 +586,6 @@ function createDotWindow() {
     });
     dotWindow.show();
     // dotWindow.webContents.openDevTools({ mode: 'detach' });
-  });
-
-  dotWindow.webContents.on('did-finish-load', () => {
-    dotWindow.webContents.insertCSS('html, body, #root { background: transparent !important; background-color: transparent !important; }');
   });
 
   return dotWindow;
@@ -643,13 +636,12 @@ function createForceButtonWindow() {
   const { width } = screen.getPrimaryDisplay().workAreaSize;
 
   forceButtonWindow = new BrowserWindow({
-    width: 100,
-    height: 100,
-    x: width - 104,
-    y: 220,
+    width: 150,
+    height: 150,
+    x: width - 127,
+    y: 197,
     frame: false,
     transparent: true,
-    backgroundColor: '#00000000',
     resizable: false,
     movable: true,
     skipTaskbar: true,
@@ -657,8 +649,6 @@ function createForceButtonWindow() {
     fullscreenable: false,
     alwaysOnTop: true,
     type: 'panel',
-    hasShadow: false,
-    roundedCorners: false,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
@@ -688,14 +678,12 @@ function createLLMDotWindow() {
   const { width } = screen.getPrimaryDisplay().workAreaSize;
 
   llmDotWindow = new BrowserWindow({
-    width: 100,
-    height: 100,
-    x: width - 104,
-    y: 150,
+    width: 150,
+    height: 150,
+    x: width - 127,
+    y: 127,
     frame: false,
     transparent: true,
-    backgroundColor: '#00000000',
-    hasShadow: false,
     resizable: false,
     movable: true,
     skipTaskbar: true,
@@ -703,7 +691,6 @@ function createLLMDotWindow() {
     fullscreenable: false,
     alwaysOnTop: true,
     type: 'panel',
-    roundedCorners: false,
     show: false,
     webPreferences: {
       nodeIntegration: true,
@@ -726,10 +713,6 @@ function createLLMDotWindow() {
     });
     llmDotWindow.show();
     // llmDotWindow.webContents.openDevTools({ mode: 'detach' });
-  });
-
-  llmDotWindow.webContents.on('did-finish-load', () => {
-    llmDotWindow.webContents.insertCSS('html, body, #root { background: transparent !important; background-color: transparent !important; }');
   });
 
   return llmDotWindow;
@@ -784,14 +767,12 @@ function createVisionToggleWindow() {
   const { width } = screen.getPrimaryDisplay().workAreaSize;
 
   visionToggleWindow = new BrowserWindow({
-    width: 100,
-    height: 100,
-    x: width - 104,
-    y: 80,
+    width: 150,
+    height: 150,
+    x: width - 127,
+    y: 57,
     frame: false,
     transparent: true,
-    backgroundColor: '#00000000',
-    hasShadow: false,
     resizable: false,
     movable: true,
     skipTaskbar: true,
@@ -799,7 +780,6 @@ function createVisionToggleWindow() {
     fullscreenable: false,
     alwaysOnTop: true,
     type: 'panel',
-    roundedCorners: false,
     show: false,
     webPreferences: {
       nodeIntegration: true,
@@ -824,10 +804,6 @@ function createVisionToggleWindow() {
     // visionToggleWindow.webContents.openDevTools({ mode: 'detach' });
   });
 
-  visionToggleWindow.webContents.on('did-finish-load', () => {
-    visionToggleWindow.webContents.insertCSS('html, body, #root { background: transparent !important; background-color: transparent !important; }');
-  });
-
   return visionToggleWindow;
 }
 
@@ -835,14 +811,12 @@ function createHubDotWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
 
   hubDotWindow = new BrowserWindow({
-    width: 100,
-    height: 100,
-    x: width - 104,
-    y: 10,
+    width: 150,
+    height: 150,
+    x: width - 127,
+    y: -13,
     frame: false,
     transparent: true,
-    backgroundColor: '#00000000',
-    hasShadow: false,
     resizable: false,
     movable: true,
     skipTaskbar: true,
@@ -850,7 +824,6 @@ function createHubDotWindow() {
     fullscreenable: false,
     alwaysOnTop: true,
     type: 'panel',
-    roundedCorners: false,
     show: false,
     webPreferences: {
       nodeIntegration: true,
@@ -873,10 +846,6 @@ function createHubDotWindow() {
     });
     hubDotWindow.show();
     // hubDotWindow.webContents.openDevTools({ mode: 'detach' });
-  });
-
-  hubDotWindow.webContents.on('did-finish-load', () => {
-    hubDotWindow.webContents.insertCSS('html, body, #root { background: transparent !important; background-color: transparent !important; }');
   });
 
   return hubDotWindow;
