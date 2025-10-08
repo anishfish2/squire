@@ -53,13 +53,8 @@ function LLMChatApp() {
     }
     ipcRenderer.on('vision-state-changed', handleVisionStateChange)
 
-    // Hide dots when chat opens
-    ipcRenderer.send('llm-chat-opened')
-
     return () => {
       ipcRenderer.removeListener('vision-state-changed', handleVisionStateChange)
-      // Show dots when chat closes
-      ipcRenderer.send('llm-chat-closed')
     }
   }, [])
 

@@ -45,6 +45,7 @@ let appPreferences = new Map(); // Cache of app preferences
 // Hub expansion state
 let isHubExpanded = false;
 let collapsedPositions = new Map(); // Store collapsed positions for each dot
+let isChatOpen = false; // Track if chat is open to prevent dots from showing
 
 // For macOS transparency to work:
 // - Keep GPU and hardware acceleration ENABLED
@@ -382,14 +383,15 @@ class OCRBatchManager {
         };
         sendToSuggestions('ai-suggestions', payload);
 
-        // Show the suggestions box window
-        if (suggestionsBoxWindow && !suggestionsBoxWindow.isDestroyed()) {
+        // Show the suggestions box window (only if chat is not open)
+        if (suggestionsBoxWindow && !suggestionsBoxWindow.isDestroyed() && !isChatOpen) {
           suggestionsBoxWindow.show();
           console.log('📦 [MAIN] Showing suggestions box with AI suggestions');
-        }
-        // Hide the dot window
-        if (dotWindow && !dotWindow.isDestroyed()) {
-          dotWindow.hide();
+
+          // Hide the dot window when showing suggestions
+          if (dotWindow && !dotWindow.isDestroyed()) {
+            dotWindow.hide();
+          }
         }
       } else {
         console.log(`🤖 [AI] No suggestions generated`);
@@ -1489,7 +1491,7 @@ ipcMain.on("debug-set-ignore-mouse-events", (event, ignore, options) => {
 
 // Toggle suggestions box visibility
 ipcMain.on("toggle-suggestions-box", (event, show) => {
-  console.log('🔄 [MAIN] Toggle suggestions box:', show);
+  console.log('🔄 [MAIN] Toggle suggestions box:', show, '| isHubExpanded:', isHubExpanded, '| isChatOpen:', isChatOpen);
   if (suggestionsBoxWindow && !suggestionsBoxWindow.isDestroyed()) {
     if (show) {
       suggestionsBoxWindow.show();
@@ -1499,10 +1501,12 @@ ipcMain.on("toggle-suggestions-box", (event, show) => {
   }
 
   // Show/hide dot window (opposite of suggestions box)
+  // Only show dot if hub is expanded AND chat is not open
   if (dotWindow && !dotWindow.isDestroyed()) {
     if (show) {
       dotWindow.hide();
-    } else {
+    } else if (isHubExpanded && !isChatOpen) {
+      // Only show if hub is expanded and chat is closed
       dotWindow.show();
     }
   }
@@ -1534,16 +1538,65 @@ ipcMain.on("move-force-button-window", (event, x, y) => {
 
 // LLM Chat window handlers
 ipcMain.on("toggle-llm-chat", (event, show) => {
-  console.log('🔄 [MAIN] Toggle LLM chat:', show);
+  console.log('🔄 [MAIN] Toggle LLM chat:', show, '| Previous isChatOpen:', isChatOpen, '| isHubExpanded:', isHubExpanded);
+
+  // Update chat state
+  isChatOpen = show;
+
   if (llmChatWindow && !llmChatWindow.isDestroyed()) {
     if (show) {
-      // Set to floating level to ensure it's above dot windows
-      llmChatWindow.setAlwaysOnTop(true, "floating");
+      // FIRST: Force hide all menu dots before showing chat
+      console.log('💬 [MAIN] Force hiding all menu dots BEFORE showing chat');
+      if (visionToggleWindow && !visionToggleWindow.isDestroyed()) {
+        visionToggleWindow.hide();
+        visionToggleWindow.setAlwaysOnTop(false);
+      }
+      if (forceButtonWindow && !forceButtonWindow.isDestroyed()) {
+        forceButtonWindow.hide();
+        forceButtonWindow.setAlwaysOnTop(false);
+      }
+      if (dotWindow && !dotWindow.isDestroyed()) {
+        dotWindow.hide();
+        dotWindow.setAlwaysOnTop(false);
+      }
+      if (llmDotWindow && !llmDotWindow.isDestroyed()) {
+        llmDotWindow.hide();
+        llmDotWindow.setAlwaysOnTop(false);
+      }
+
+      // THEN: Show chat window at highest level
+      llmChatWindow.setAlwaysOnTop(true, "pop-up-menu");
       llmChatWindow.show();
+      llmChatWindow.focus();
     } else {
       llmChatWindow.hide();
+      llmChatWindow.setAlwaysOnTop(true, "screen-saver");
+
+      // Show menu dots if hub is expanded and restore their always-on-top
+      console.log('💬 [MAIN] Chat closed. isHubExpanded:', isHubExpanded);
+      if (isHubExpanded) {
+        console.log('💬 [MAIN] Showing all menu dots');
+        if (visionToggleWindow && !visionToggleWindow.isDestroyed()) {
+          visionToggleWindow.setAlwaysOnTop(true, "screen-saver");
+          visionToggleWindow.show();
+        }
+        if (forceButtonWindow && !forceButtonWindow.isDestroyed()) {
+          forceButtonWindow.setAlwaysOnTop(true, "screen-saver");
+          forceButtonWindow.show();
+        }
+        if (dotWindow && !dotWindow.isDestroyed()) {
+          dotWindow.setAlwaysOnTop(true, "screen-saver");
+          dotWindow.show();
+        }
+        if (llmDotWindow && !llmDotWindow.isDestroyed()) {
+          llmDotWindow.setAlwaysOnTop(true, "screen-saver");
+          llmDotWindow.show();
+        }
+      }
     }
   }
+
+  console.log('🔄 [MAIN] After toggle - isChatOpen:', isChatOpen);
 });
 
 ipcMain.on("move-llm-dot-window", (event, x, y) => {
@@ -1799,8 +1852,11 @@ ipcMain.handle("get-desktop-sources", async (event) => {
 
 // Show screenshot overlay for region selection
 ipcMain.on('start-screenshot-capture', () => {
+  console.log('📸 [MAIN] Starting screenshot capture');
+
   // Hide chat window
   if (llmChatWindow && !llmChatWindow.isDestroyed()) {
+    console.log('📸 [MAIN] Hiding chat window for screenshot');
     llmChatWindow.hide();
   }
 
@@ -1940,15 +1996,23 @@ async function expandHub() {
   });
 
   // Animate each dot to its expanded position (vertically below hub)
+  console.log('🔄 [MAIN] Expanding hub. isChatOpen:', isChatOpen);
+
   const animations = dotsToExpand.map(({ window, offset }) => {
     if (!window || window.isDestroyed()) return Promise.resolve();
 
     const targetY = hubBounds.y + (spacing * offset);
 
-    // Show the window first at hub position if hidden
-    if (!window.isVisible()) {
+    // Show the window first at hub position if hidden, but only if chat is not open
+    const isVisible = window.isVisible();
+    console.log('🔄 [MAIN] Window visible:', isVisible, '| isChatOpen:', isChatOpen);
+
+    if (!isVisible && !isChatOpen) {
+      console.log('🔄 [MAIN] Showing window at hub position');
       window.setBounds({ x: hubCenterX, y: hubBounds.y, width: window.getBounds().width, height: window.getBounds().height });
       window.show();
+    } else if (isChatOpen) {
+      console.log('🔄 [MAIN] Chat is open, not showing window');
     }
 
     return animateWindowToPosition(window, hubCenterX, targetY);
@@ -2009,36 +2073,5 @@ ipcMain.on('toggle-hub-expansion', async (event, shouldExpand) => {
   }
 });
 
-// Hide menu dots when LLM chat opens
-ipcMain.on('llm-chat-opened', () => {
-  console.log('💬 [MAIN] LLM chat opened - hiding menu dots');
-
-  if (visionToggleWindow && !visionToggleWindow.isDestroyed()) {
-    visionToggleWindow.hide();
-  }
-  if (forceButtonWindow && !forceButtonWindow.isDestroyed()) {
-    forceButtonWindow.hide();
-  }
-  if (dotWindow && !dotWindow.isDestroyed()) {
-    dotWindow.hide();
-  }
-});
-
-// Show menu dots when LLM chat closes
-ipcMain.on('llm-chat-closed', () => {
-  console.log('💬 [MAIN] LLM chat closed - showing menu dots');
-
-  if (isHubExpanded) {
-    if (visionToggleWindow && !visionToggleWindow.isDestroyed()) {
-      visionToggleWindow.show();
-    }
-    if (forceButtonWindow && !forceButtonWindow.isDestroyed()) {
-      forceButtonWindow.show();
-    }
-    if (dotWindow && !dotWindow.isDestroyed()) {
-      dotWindow.show();
-    }
-  }
-});
 
 
