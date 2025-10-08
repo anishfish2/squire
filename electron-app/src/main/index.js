@@ -46,6 +46,7 @@ let appPreferences = new Map(); // Cache of app preferences
 let isHubExpanded = false;
 let collapsedPositions = new Map(); // Store collapsed positions for each dot
 let isChatOpen = false; // Track if chat is open to prevent dots from showing
+let unreadSuggestionsCount = 0; // Track unread suggestions for badge
 
 // For macOS transparency to work:
 // - Keep GPU and hardware acceleration ENABLED
@@ -381,16 +382,22 @@ class OCRBatchManager {
           windowTitle: 'Batch Analysis',
           aiSuggestions: suggestions
         };
-        sendToSuggestions('ai-suggestions', payload);
 
-        // Show the suggestions box window (only if chat is not open)
-        if (suggestionsBoxWindow && !suggestionsBoxWindow.isDestroyed() && !isChatOpen) {
-          suggestionsBoxWindow.show();
-          console.log('📦 [MAIN] Showing suggestions box with AI suggestions');
+        // Send suggestions to chat window instead of separate suggestions box
+        if (llmChatWindow && !llmChatWindow.isDestroyed()) {
+          llmChatWindow.webContents.send('ai-suggestions', payload);
+          console.log('📦 [MAIN] Sent AI suggestions to chat window');
 
-          // Hide the dot window when showing suggestions
-          if (dotWindow && !dotWindow.isDestroyed()) {
-            dotWindow.hide();
+          // Update unread count and notify hub dot
+          unreadSuggestionsCount += suggestions.length;
+          if (hubDotWindow && !hubDotWindow.isDestroyed()) {
+            hubDotWindow.webContents.send('unread-suggestions-count', unreadSuggestionsCount);
+          }
+
+          // Show and focus chat window if not already open
+          if (!isChatOpen) {
+            ipcMain.emit('toggle-llm-chat', null, true);
+            console.log('📦 [MAIN] Opening chat window to show suggestions');
           }
         }
       } else {
@@ -733,7 +740,7 @@ function createLLMChatWindow() {
     frame: false,
     transparent: true,
     resizable: true,
-    movable: false,
+    movable: true,
     skipTaskbar: true,
     focusable: true,
     backgroundColor: '#00000000',
@@ -751,14 +758,6 @@ function createLLMChatWindow() {
     },
   });
 
-  // Keep window anchored to right edge when resized
-  llmChatWindow.on('resize', () => {
-    const bounds = llmChatWindow.getBounds();
-    const display = screen.getPrimaryDisplay();
-    const screenWidth = display.workAreaSize.width;
-    llmChatWindow.setPosition(screenWidth - bounds.width, 0);
-  });
-
   if (process.env.VITE_DEV_SERVER_URL) {
     llmChatWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}/llm-chat/index.html`);
   } else {
@@ -771,6 +770,9 @@ function createLLMChatWindow() {
       visibleOnFullScreen: true,
       skipTransformProcessType: true,
     });
+
+    // Open DevTools for debugging
+    llmChatWindow.webContents.openDevTools({ mode: 'detach' });
   });
 
   return llmChatWindow;
@@ -1575,7 +1577,7 @@ ipcMain.on("toggle-llm-chat", (event, show) => {
       // Show menu dots if hub is expanded and restore their always-on-top
       console.log('💬 [MAIN] Chat closed. isHubExpanded:', isHubExpanded);
       if (isHubExpanded) {
-        console.log('💬 [MAIN] Showing all menu dots');
+        console.log('💬 [MAIN] Showing all menu dots in expanded positions');
         if (visionToggleWindow && !visionToggleWindow.isDestroyed()) {
           visionToggleWindow.setAlwaysOnTop(true, "screen-saver");
           visionToggleWindow.show();
@@ -1592,11 +1594,44 @@ ipcMain.on("toggle-llm-chat", (event, show) => {
           llmDotWindow.setAlwaysOnTop(true, "screen-saver");
           llmDotWindow.show();
         }
+      } else {
+        // If hub is collapsed, arrange dots horizontally
+        console.log('💬 [MAIN] Arranging dots horizontally (hub collapsed)');
+        if (hubDotWindow && !hubDotWindow.isDestroyed()) {
+          const hubBounds = hubDotWindow.getBounds();
+          const spacing = 50; // Horizontal spacing between dots
+          let offset = 0;
+
+          const dots = [
+            visionToggleWindow,
+            llmDotWindow,
+            forceButtonWindow,
+            dotWindow
+          ];
+
+          dots.forEach((window) => {
+            if (window && !window.isDestroyed()) {
+              window.setPosition(hubBounds.x + offset, hubBounds.y);
+              window.setAlwaysOnTop(true, "screen-saver");
+              window.show();
+              offset += spacing;
+            }
+          });
+        }
       }
     }
   }
 
   console.log('🔄 [MAIN] After toggle - isChatOpen:', isChatOpen);
+});
+
+// Handle suggestions read event
+ipcMain.on('suggestions-read', () => {
+  console.log('📖 [MAIN] Suggestions marked as read');
+  unreadSuggestionsCount = 0;
+  if (hubDotWindow && !hubDotWindow.isDestroyed()) {
+    hubDotWindow.webContents.send('unread-suggestions-count', 0);
+  }
 });
 
 ipcMain.on("move-llm-dot-window", (event, x, y) => {
@@ -1666,6 +1701,13 @@ ipcMain.on("move-hub-dot-window", (event, x, y) => {
         visionToggleWindow.setPosition(Math.round(x), collapsedY);
       }
     }
+  }
+});
+
+// Move LLM chat window handler
+ipcMain.on("move-llm-chat-window", (event, x, y) => {
+  if (llmChatWindow && !llmChatWindow.isDestroyed()) {
+    llmChatWindow.setPosition(Math.round(x), Math.round(y));
   }
 });
 
@@ -2029,6 +2071,7 @@ async function expandHub() {
 async function collapseHub() {
   if (!hubDotWindow || hubDotWindow.isDestroyed()) return;
 
+  console.log('🔻 [MAIN] Collapsing hub - hiding all dots');
   isHubExpanded = false;
 
   // Get hub position
@@ -2053,9 +2096,12 @@ async function collapseHub() {
   // Hide all dots after animation
   dotsToCollapse.forEach((window) => {
     if (window && !window.isDestroyed()) {
+      console.log('🔻 [MAIN] Hiding dot window');
       window.hide();
     }
   });
+
+  console.log('🔻 [MAIN] Hub collapse complete');
 
   // Notify hub window about expansion state
   if (hubDotWindow && !hubDotWindow.isDestroyed()) {

@@ -6,6 +6,7 @@ const { ipcRenderer } = window.require('electron')
 const HubDotApp = () => {
   const [isExpanded, setIsExpanded] = useState(false)
   const [isHovered, setIsHovered] = useState(false)
+  const [unreadCount, setUnreadCount] = useState(0)
   const dragStateRef = useRef({
     isDragging: false,
     startX: 0,
@@ -24,6 +25,23 @@ const HubDotApp = () => {
     ipcRenderer.on('hub-expansion-changed', (_, expanded) => {
       setIsExpanded(expanded)
     })
+
+    // Listen for unread suggestions count updates
+    ipcRenderer.on('unread-suggestions-count', (_, count) => {
+      setUnreadCount(count)
+    })
+
+    // Keyboard shortcut for toggling LLM chat pane
+    const handleKeyDown = (e) => {
+      // Cmd+Shift+L - Toggle LLM Chat
+      if (e.metaKey && e.shiftKey && e.key === 'L') {
+        e.preventDefault()
+        handleClick() // Toggle expansion/chat
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
 
   const handleClick = () => {
@@ -137,6 +155,21 @@ const HubDotApp = () => {
           <circle cx="12" cy="12" r="1" fill="white"></circle>
           <circle cx="12" cy="19" r="1" fill="white"></circle>
         </svg>
+        {unreadCount > 0 && (
+          <div
+            style={{
+              position: 'absolute',
+              top: '-2px',
+              right: '-2px',
+              width: '12px',
+              height: '12px',
+              borderRadius: '50%',
+              background: '#ef4444',
+              border: '2px solid rgba(71, 85, 105, 0.9)',
+              animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite'
+            }}
+          />
+        )}
       </div>
     </div>
   )

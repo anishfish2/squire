@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     # Anthropic settings
     ANTHROPIC_API_KEY: str
 
+    # Google settings
+    GOOGLE_API_KEY: str
+
     # Security settings
     ALLOWED_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000"]
     ALLOWED_HOSTS: List[str] = ["localhost", "127.0.0.1"]
