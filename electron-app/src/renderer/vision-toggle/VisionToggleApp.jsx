@@ -16,8 +16,10 @@ function VisionToggleApp() {
     clickStartPos: { x: 0, y: 0 }
   })
 
-  // Sync state with backend on mount
+  // Sync state with backend on mount and enable click-through
   useEffect(() => {
+    ipcRenderer.send('set-vision-toggle-click-through', true)
+
     ipcRenderer.invoke('get-vision-state').then(backendState => {
       console.log('[VisionToggle] Initial backend state:', backendState)
       setIsEnabled(backendState)
@@ -101,7 +103,7 @@ function VisionToggleApp() {
   }, [handleMouseMove, handleMouseUp])
 
   return (
-    <div className="w-14 h-14 flex items-center justify-center bg-transparent">
+    <div style={{ width: '100px', height: '100px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent' }}>
       <div
         className="vision-toggle-button"
         style={{
@@ -134,12 +136,14 @@ function VisionToggleApp() {
           e.currentTarget.style.boxShadow = isEnabled
             ? '0 6px 20px rgba(16, 185, 129, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.3)'
             : '0 6px 20px rgba(239, 68, 68, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.3)'
+          ipcRenderer.send('set-vision-toggle-click-through', false)
         }}
         onMouseLeave={(e) => {
           e.currentTarget.style.transform = 'scale(1)'
           e.currentTarget.style.boxShadow = isEnabled
             ? '0 4px 15px rgba(16, 185, 129, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.2)'
             : '0 4px 15px rgba(239, 68, 68, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.2)'
+          ipcRenderer.send('set-vision-toggle-click-through', true)
         }}
         title={isEnabled ? 'Vision Pipeline: ON' : 'Vision Pipeline: OFF'}
       >

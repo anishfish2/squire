@@ -114,11 +114,16 @@ function ForceButtonApp() {
 
   const [isHovered, setIsHovered] = useState(false)
 
+  // Enable click-through on mount
+  useEffect(() => {
+    ipcRenderer.send('set-force-button-click-through', true)
+  }, [])
+
   return (
     <div
       style={{
-        width: '56px',
-        height: '56px',
+        width: '100px',
+        height: '100px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -146,8 +151,14 @@ function ForceButtonApp() {
         title="Get Suggestions Now"
         onClick={handleForceSuggestion}
         onMouseDown={handleMouseDown}
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
+        onMouseEnter={() => {
+          setIsHovered(true)
+          ipcRenderer.send('set-force-button-click-through', false)
+        }}
+        onMouseLeave={() => {
+          setIsHovered(false)
+          ipcRenderer.send('set-force-button-click-through', true)
+        }}
       >
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.9 }}>
           <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path>

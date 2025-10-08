@@ -551,10 +551,10 @@ function createDotWindow() {
   const { width } = screen.getPrimaryDisplay().workAreaSize;
 
   dotWindow = new BrowserWindow({
-    width: 56,
-    height: 56,
-    x: width - 82,
-    y: 20,
+    width: 100,
+    height: 100,
+    x: width - 104,
+    y: 290,
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
@@ -588,7 +588,7 @@ function createDotWindow() {
       skipTransformProcessType: true,
     });
     dotWindow.show();
-    dotWindow.webContents.openDevTools({ mode: 'detach' });
+    // dotWindow.webContents.openDevTools({ mode: 'detach' });
   });
 
   dotWindow.webContents.on('did-finish-load', () => {
@@ -596,8 +596,7 @@ function createDotWindow() {
   });
 
   return dotWindow;
-}
-
+ }
 function createSuggestionsBoxWindow() {
   const { width } = screen.getPrimaryDisplay().workAreaSize;
 
@@ -644,20 +643,22 @@ function createForceButtonWindow() {
   const { width } = screen.getPrimaryDisplay().workAreaSize;
 
   forceButtonWindow = new BrowserWindow({
-    width: 56,
-    height: 56,
-    x: width - 82,
-    y: 90,
+    width: 100,
+    height: 100,
+    x: width - 104,
+    y: 220,
     frame: false,
     transparent: true,
-    backgroundColor: '#00000000', // Fully transparent
+    backgroundColor: '#00000000',
     resizable: false,
     movable: true,
     skipTaskbar: true,
     focusable: true,
     fullscreenable: false,
     alwaysOnTop: true,
+    type: 'panel',
     hasShadow: false,
+    roundedCorners: false,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
@@ -687,10 +688,10 @@ function createLLMDotWindow() {
   const { width } = screen.getPrimaryDisplay().workAreaSize;
 
   llmDotWindow = new BrowserWindow({
-    width: 56,
-    height: 56,
-    x: width - 82,
-    y: 150,  // Position below the force button
+    width: 100,
+    height: 100,
+    x: width - 104,
+    y: 150,
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
@@ -724,7 +725,7 @@ function createLLMDotWindow() {
       skipTransformProcessType: true,
     });
     llmDotWindow.show();
-    llmDotWindow.webContents.openDevTools({ mode: 'detach' });
+    // llmDotWindow.webContents.openDevTools({ mode: 'detach' });
   });
 
   llmDotWindow.webContents.on('did-finish-load', () => {
@@ -783,10 +784,10 @@ function createVisionToggleWindow() {
   const { width } = screen.getPrimaryDisplay().workAreaSize;
 
   visionToggleWindow = new BrowserWindow({
-    width: 56,
-    height: 56,
-    x: width - 82,
-    y: 210,  // Position below the LLM dot
+    width: 100,
+    height: 100,
+    x: width - 104,
+    y: 80,
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
@@ -834,10 +835,10 @@ function createHubDotWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
 
   hubDotWindow = new BrowserWindow({
-    width: 60,
-    height: 60,
-    x: width - 90,
-    y: 30,  // Top position - main hub
+    width: 100,
+    height: 100,
+    x: width - 104,
+    y: 10,
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
@@ -1292,10 +1293,8 @@ function setupPipelines() {
 }
 
 app.whenReady().then(async () => {
-  createMainWindow();
-  // createDebugWindow();  // Hidden per user request
+  // createMainWindow();
   createSuggestionsWindow();
-
   // Set up application menu
   const template = [
     {
@@ -1556,6 +1555,37 @@ ipcMain.on('llm-dot-drag', (evt, phase) => {
 ipcMain.on("move-vision-toggle-window", (event, x, y) => {
   if (visionToggleWindow && !visionToggleWindow.isDestroyed()) {
     visionToggleWindow.setPosition(Math.round(x), Math.round(y));
+  }
+});
+
+// Click-through handlers for all dot windows
+ipcMain.on('set-dot-click-through', (event, enabled) => {
+  if (dotWindow && !dotWindow.isDestroyed()) {
+    dotWindow.setIgnoreMouseEvents(enabled, { forward: true });
+  }
+});
+
+ipcMain.on('set-force-button-click-through', (event, enabled) => {
+  if (forceButtonWindow && !forceButtonWindow.isDestroyed()) {
+    forceButtonWindow.setIgnoreMouseEvents(enabled, { forward: true });
+  }
+});
+
+ipcMain.on('set-llm-dot-click-through', (event, enabled) => {
+  if (llmDotWindow && !llmDotWindow.isDestroyed()) {
+    llmDotWindow.setIgnoreMouseEvents(enabled, { forward: true });
+  }
+});
+
+ipcMain.on('set-vision-toggle-click-through', (event, enabled) => {
+  if (visionToggleWindow && !visionToggleWindow.isDestroyed()) {
+    visionToggleWindow.setIgnoreMouseEvents(enabled, { forward: true });
+  }
+});
+
+ipcMain.on('set-hub-dot-click-through', (event, enabled) => {
+  if (hubDotWindow && !hubDotWindow.isDestroyed()) {
+    hubDotWindow.setIgnoreMouseEvents(enabled, { forward: true });
   }
 });
 

@@ -95,20 +95,9 @@ function DotApp() {
   const [isHovered, setIsHovered] = useState(false)
   const dotRef = useRef(null)
 
+  // Enable click-through on mount, will be disabled when hovering over dot
   useEffect(() => {
-    if (dotRef.current) {
-      const computedStyle = window.getComputedStyle(dotRef.current)
-      console.log('=== DOT COMPUTED STYLES ===')
-      console.log('background:', computedStyle.background)
-      console.log('backgroundColor:', computedStyle.backgroundColor)
-      console.log('backgroundImage:', computedStyle.backgroundImage)
-      console.log('width:', computedStyle.width)
-      console.log('height:', computedStyle.height)
-      console.log('borderRadius:', computedStyle.borderRadius)
-      console.log('border:', computedStyle.border)
-      console.log('display:', computedStyle.display)
-      console.log('===========================')
-    }
+    ipcRenderer.send('set-dot-click-through', true)
   }, [])
 
   const dotStyle = {
@@ -132,8 +121,8 @@ function DotApp() {
   return (
     <div
       style={{
-        width: '56px',
-        height: '56px',
+        width: '100px',
+        height: '100px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -150,8 +139,14 @@ function DotApp() {
           }
         }}
         onMouseDown={handleMouseDown}
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
+        onMouseEnter={() => {
+          setIsHovered(true)
+          ipcRenderer.send('set-dot-click-through', false)
+        }}
+        onMouseLeave={() => {
+          setIsHovered(false)
+          ipcRenderer.send('set-dot-click-through', true)
+        }}
       >
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.9 }}>
           <circle cx="11" cy="11" r="8"></circle>

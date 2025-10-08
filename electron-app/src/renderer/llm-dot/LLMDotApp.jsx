@@ -76,20 +76,9 @@ function LLMDotApp() {
   const [isHovered, setIsHovered] = useState(false)
   const dotRef = useRef(null)
 
+  // Enable click-through on mount
   useEffect(() => {
-    if (dotRef.current) {
-      const computedStyle = window.getComputedStyle(dotRef.current)
-      console.log('=== LLM-DOT COMPUTED STYLES ===')
-      console.log('background:', computedStyle.background)
-      console.log('backgroundColor:', computedStyle.backgroundColor)
-      console.log('backgroundImage:', computedStyle.backgroundImage)
-      console.log('width:', computedStyle.width)
-      console.log('height:', computedStyle.height)
-      console.log('borderRadius:', computedStyle.borderRadius)
-      console.log('border:', computedStyle.border)
-      console.log('display:', computedStyle.display)
-      console.log('===========================')
-    }
+    ipcRenderer.send('set-llm-dot-click-through', true)
   }, [])
 
   const dotStyle = {
@@ -113,8 +102,8 @@ function LLMDotApp() {
   return (
     <div
       style={{
-        width: '56px',
-        height: '56px',
+        width: '100px',
+        height: '100px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -129,8 +118,14 @@ function LLMDotApp() {
           ipcRenderer.send('toggle-llm-chat', true)
         }}
         onMouseDown={handleMouseDown}
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
+        onMouseEnter={() => {
+          setIsHovered(true)
+          ipcRenderer.send('set-llm-dot-click-through', false)
+        }}
+        onMouseLeave={() => {
+          setIsHovered(false)
+          ipcRenderer.send('set-llm-dot-click-through', true)
+        }}
       >
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.9 }}>
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>

@@ -8,6 +8,9 @@ const HubDotApp = () => {
   const [isHovered, setIsHovered] = useState(false)
 
   useEffect(() => {
+    // Enable click-through on mount
+    ipcRenderer.send('set-hub-dot-click-through', true)
+
     // Listen for expansion state updates from main process
     ipcRenderer.on('hub-expansion-changed', (_, expanded) => {
       setIsExpanded(expanded)
@@ -31,8 +34,14 @@ const HubDotApp = () => {
         cursor: 'pointer'
       }}
       onClick={handleClick}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
+      onMouseEnter={() => {
+        setIsHovered(true)
+        ipcRenderer.send('set-hub-dot-click-through', false)
+      }}
+      onMouseLeave={() => {
+        setIsHovered(false)
+        ipcRenderer.send('set-hub-dot-click-through', true)
+      }}
     >
       <div
         style={{
