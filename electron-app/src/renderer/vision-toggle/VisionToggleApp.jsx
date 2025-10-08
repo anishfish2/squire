@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import '@/styles.css'
 
@@ -6,15 +6,6 @@ const { ipcRenderer } = window.require('electron')
 
 function VisionToggleApp() {
   const [isEnabled, setIsEnabled] = useState(true) // Default to enabled
-  const dragStateRef = useRef({
-    isDragging: false,
-    startX: 0,
-    startY: 0,
-    startBoxX: 0,
-    startBoxY: 0,
-    clickStartTime: 0,
-    clickStartPos: { x: 0, y: 0 }
-  })
 
   // Sync state with backend on mount and enable click-through
   useEffect(() => {
@@ -39,50 +30,6 @@ function VisionToggleApp() {
     }
   }, [])
 
-  // Handle dragging
-  const handleMouseDown = (e) => {
-    const dragState = dragStateRef.current
-    dragState.isDragging = true
-    dragState.startX = e.screenX
-    dragState.startY = e.screenY
-    dragState.clickStartTime = Date.now()
-    dragState.clickStartPos = { x: e.screenX, y: e.screenY }
-    dragState.startBoxX = e.screenX - e.clientX
-    dragState.startBoxY = e.screenY - e.clientY
-    e.preventDefault()
-    e.stopPropagation()
-  }
-
-  const handleMouseMove = useCallback((e) => {
-    const dragState = dragStateRef.current
-    if (!dragState.isDragging) return
-
-    const deltaX = e.screenX - dragState.startX
-    const deltaY = e.screenY - dragState.startY
-    const newScreenX = dragState.startBoxX + deltaX
-    const newScreenY = dragState.startBoxY + deltaY
-
-    ipcRenderer.send('move-vision-toggle-window', newScreenX, newScreenY)
-  }, [])
-
-  const handleMouseUp = useCallback((e) => {
-    const dragState = dragStateRef.current
-    if (!dragState.isDragging) return
-
-    const timeDiff = Date.now() - dragState.clickStartTime
-    const distance = Math.hypot(
-      e.screenX - dragState.clickStartPos.x,
-      e.screenY - dragState.clickStartPos.y
-    )
-
-    dragState.isDragging = false
-
-    // If it was just a quick click, toggle vision
-    if (timeDiff < 200 && distance < 5) {
-      toggleVision()
-    }
-  }, [])
-
   const toggleVision = () => {
     const newState = !isEnabled
     console.log(`[VisionToggle] Toggling vision: ${isEnabled} -> ${newState}`)
@@ -90,17 +37,6 @@ function VisionToggleApp() {
     ipcRenderer.send('toggle-global-vision', newState)
     console.log('[VisionToggle] IPC message sent to backend')
   }
-
-  // Add global mouse listeners for dragging
-  useEffect(() => {
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mouseup', handleMouseUp)
-
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
-    }
-  }, [handleMouseMove, handleMouseUp])
 
   return (
     <div style={{ width: '150px', height: '150px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent' }}>
@@ -112,11 +48,11 @@ function VisionToggleApp() {
           height: '40px',
           borderRadius: '50%',
           background: isEnabled
-            ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' // Green when on
-            : 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)', // Red when off
+            ? 'rgba(100, 116, 139, 0.9)' // Lighter slate when on
+            : 'rgba(51, 65, 85, 0.9)', // Darker slate when off
           boxShadow: isEnabled
-            ? '0 4px 15px rgba(16, 185, 129, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.2)'
-            : '0 4px 15px rgba(239, 68, 68, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.2)',
+            ? '0 4px 15px rgba(100, 116, 139, 0.3), inset 0 1px 1px rgba(255, 255, 255, 0.2)'
+            : '0 4px 15px rgba(51, 65, 85, 0.3), inset 0 1px 1px rgba(255, 255, 255, 0.2)',
           cursor: 'pointer',
           transition: 'all 0.2s ease',
           display: 'flex',
@@ -130,19 +66,18 @@ function VisionToggleApp() {
           e.stopPropagation()
           toggleVision()
         }}
-        onMouseDown={handleMouseDown}
         onMouseEnter={(e) => {
           e.currentTarget.style.transform = 'scale(1.1)'
           e.currentTarget.style.boxShadow = isEnabled
-            ? '0 6px 20px rgba(16, 185, 129, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.3)'
-            : '0 6px 20px rgba(239, 68, 68, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.3)'
+            ? '0 6px 20px rgba(100, 116, 139, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.3)'
+            : '0 6px 20px rgba(51, 65, 85, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.3)'
           ipcRenderer.send('set-vision-toggle-click-through', false)
         }}
         onMouseLeave={(e) => {
           e.currentTarget.style.transform = 'scale(1)'
           e.currentTarget.style.boxShadow = isEnabled
-            ? '0 4px 15px rgba(16, 185, 129, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.2)'
-            : '0 4px 15px rgba(239, 68, 68, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.2)'
+            ? '0 4px 15px rgba(100, 116, 139, 0.3), inset 0 1px 1px rgba(255, 255, 255, 0.2)'
+            : '0 4px 15px rgba(51, 65, 85, 0.3), inset 0 1px 1px rgba(255, 255, 255, 0.2)'
           ipcRenderer.send('set-vision-toggle-click-through', true)
         }}
         title={isEnabled ? 'Vision Pipeline: ON' : 'Vision Pipeline: OFF'}

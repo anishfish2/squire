@@ -1,4 +1,4 @@
-import { app, BrowserWindow, screen, ipcMain, Menu, dialog, systemPreferences, globalShortcut } from 'electron'
+import { app, BrowserWindow, screen, ipcMain, Menu, dialog, systemPreferences, globalShortcut, desktopCapturer } from 'electron'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
@@ -23,6 +23,7 @@ let llmDotWindow;
 let llmChatWindow;
 let visionToggleWindow;
 let hubDotWindow;
+let screenshotOverlayWindow;
 let ocrManager;
 let appTracker;
 let activityTracker;
@@ -719,31 +720,41 @@ function createLLMDotWindow() {
 }
 
 function createLLMChatWindow() {
-  const { width } = screen.getPrimaryDisplay().workAreaSize;
+  const display = screen.getPrimaryDisplay();
+  const { width, height } = display.workAreaSize;
 
   llmChatWindow = new BrowserWindow({
-    width: 500,
-    height: 600,
-    x: width - 520,
-    y: 150,  // Position next to the LLM dot
+    width: 450,
+    height: height,
+    x: width - 450,
+    y: 0,
     frame: false,
     transparent: true,
     resizable: true,
-    movable: true,
+    movable: false,
     skipTaskbar: true,
     focusable: true,
     backgroundColor: '#00000000',
     vibrancy: 'under-window',
     fullscreenable: false,
     alwaysOnTop: true,
-    show: false,  // Hidden by default
+    show: false,
+    minWidth: 350,
+    maxWidth: 800,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
       enableWebSQL: false,
-      // Explicitly enable standard editing features
       spellcheck: true,
     },
+  });
+
+  // Keep window anchored to right edge when resized
+  llmChatWindow.on('resize', () => {
+    const bounds = llmChatWindow.getBounds();
+    const display = screen.getPrimaryDisplay();
+    const screenWidth = display.workAreaSize.width;
+    llmChatWindow.setPosition(screenWidth - bounds.width, 0);
   });
 
   if (process.env.VITE_DEV_SERVER_URL) {
@@ -849,6 +860,41 @@ function createHubDotWindow() {
   });
 
   return hubDotWindow;
+}
+
+function createScreenshotOverlayWindow() {
+  const { width, height } = screen.getPrimaryDisplay().bounds;
+
+  screenshotOverlayWindow = new BrowserWindow({
+    width: width,
+    height: height,
+    x: 0,
+    y: 0,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    focusable: true,
+    show: false,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+    },
+  });
+
+  if (process.env.VITE_DEV_SERVER_URL) {
+    screenshotOverlayWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}/screenshot-overlay/index.html`);
+  } else {
+    screenshotOverlayWindow.loadFile(path.join(__dirname, '../renderer/screenshot-overlay/index.html'));
+  }
+
+  screenshotOverlayWindow.once("ready-to-show", () => {
+    screenshotOverlayWindow.setAlwaysOnTop(true, "screen-saver");
+  });
+
+  return screenshotOverlayWindow;
 }
 
 function createSuggestionsWindow() {
@@ -1491,6 +1537,8 @@ ipcMain.on("toggle-llm-chat", (event, show) => {
   console.log('🔄 [MAIN] Toggle LLM chat:', show);
   if (llmChatWindow && !llmChatWindow.isDestroyed()) {
     if (show) {
+      // Set to floating level to ensure it's above dot windows
+      llmChatWindow.setAlwaysOnTop(true, "floating");
       llmChatWindow.show();
     } else {
       llmChatWindow.hide();
@@ -1524,6 +1572,47 @@ ipcMain.on('llm-dot-drag', (evt, phase) => {
 ipcMain.on("move-vision-toggle-window", (event, x, y) => {
   if (visionToggleWindow && !visionToggleWindow.isDestroyed()) {
     visionToggleWindow.setPosition(Math.round(x), Math.round(y));
+  }
+});
+
+// Hub dot window handler - moves all dots together
+ipcMain.on("move-hub-dot-window", (event, x, y) => {
+  if (hubDotWindow && !hubDotWindow.isDestroyed()) {
+    hubDotWindow.setPosition(Math.round(x), Math.round(y));
+
+    if (isHubExpanded) {
+      // Maintain individual offsets when expanded (spacing = 70)
+      const spacing = 70;
+
+      if (visionToggleWindow && !visionToggleWindow.isDestroyed()) {
+        visionToggleWindow.setPosition(Math.round(x), Math.round(y) + spacing);
+      }
+      if (llmDotWindow && !llmDotWindow.isDestroyed()) {
+        llmDotWindow.setPosition(Math.round(x), Math.round(y) + spacing * 2);
+      }
+      if (forceButtonWindow && !forceButtonWindow.isDestroyed()) {
+        forceButtonWindow.setPosition(Math.round(x), Math.round(y) + spacing * 3);
+      }
+      if (dotWindow && !dotWindow.isDestroyed()) {
+        dotWindow.setPosition(Math.round(x), Math.round(y) + spacing * 4);
+      }
+    } else {
+      // Keep all dots at hub position when collapsed (hidden)
+      const collapsedY = Math.round(y);
+
+      if (dotWindow && !dotWindow.isDestroyed()) {
+        dotWindow.setPosition(Math.round(x), collapsedY);
+      }
+      if (forceButtonWindow && !forceButtonWindow.isDestroyed()) {
+        forceButtonWindow.setPosition(Math.round(x), collapsedY);
+      }
+      if (llmDotWindow && !llmDotWindow.isDestroyed()) {
+        llmDotWindow.setPosition(Math.round(x), collapsedY);
+      }
+      if (visionToggleWindow && !visionToggleWindow.isDestroyed()) {
+        visionToggleWindow.setPosition(Math.round(x), collapsedY);
+      }
+    }
   }
 });
 
@@ -1689,6 +1778,102 @@ ipcMain.handle("get-vision-state", (event) => {
   return currentState;
 });
 
+// Screenshot capture handler
+ipcMain.handle("get-desktop-sources", async (event) => {
+  try {
+    const sources = await desktopCapturer.getSources({
+      types: ['window', 'screen'],
+      thumbnailSize: { width: 1920, height: 1080 }
+    });
+
+    return sources.map(source => ({
+      id: source.id,
+      name: source.name,
+      thumbnail: source.thumbnail.toDataURL()
+    }));
+  } catch (error) {
+    console.error('Error getting desktop sources:', error);
+    return [];
+  }
+});
+
+// Show screenshot overlay for region selection
+ipcMain.on('start-screenshot-capture', () => {
+  // Hide chat window
+  if (llmChatWindow && !llmChatWindow.isDestroyed()) {
+    llmChatWindow.hide();
+  }
+
+  // Create or show screenshot overlay
+  if (!screenshotOverlayWindow || screenshotOverlayWindow.isDestroyed()) {
+    createScreenshotOverlayWindow();
+  }
+
+  screenshotOverlayWindow.show();
+  screenshotOverlayWindow.focus();
+});
+
+// Capture screenshot of selected region
+ipcMain.handle('capture-screenshot-region', async (event, bounds) => {
+  try {
+    const display = screen.getPrimaryDisplay();
+    const scaleFactor = display.scaleFactor;
+
+    const sources = await desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: {
+        width: display.bounds.width * scaleFactor,
+        height: display.bounds.height * scaleFactor
+      }
+    });
+
+    if (sources.length === 0) return null;
+
+    const source = sources[0];
+    const screenshot = source.thumbnail;
+
+    // Account for display scaling
+    const scaledBounds = {
+      x: Math.round(bounds.x * scaleFactor),
+      y: Math.round(bounds.y * scaleFactor),
+      width: Math.round(bounds.width * scaleFactor),
+      height: Math.round(bounds.height * scaleFactor)
+    };
+
+    // Create canvas to crop the region
+    const canvas = screenshot.crop(scaledBounds);
+
+    const croppedDataURL = canvas.toDataURL();
+
+    // Hide overlay and show chat window
+    if (screenshotOverlayWindow && !screenshotOverlayWindow.isDestroyed()) {
+      screenshotOverlayWindow.hide();
+    }
+
+    if (llmChatWindow && !llmChatWindow.isDestroyed()) {
+      llmChatWindow.show();
+      // Send screenshot to chat window
+      llmChatWindow.webContents.send('screenshot-captured', croppedDataURL);
+    }
+
+    return croppedDataURL;
+  } catch (error) {
+    console.error('Error capturing screenshot region:', error);
+    return null;
+  }
+});
+
+// Cancel screenshot capture
+ipcMain.on('cancel-screenshot-capture', () => {
+  if (screenshotOverlayWindow && !screenshotOverlayWindow.isDestroyed()) {
+    screenshotOverlayWindow.hide();
+  }
+
+  if (llmChatWindow && !llmChatWindow.isDestroyed()) {
+    llmChatWindow.show();
+  }
+});
+
 ipcMain.on('dot-drag', (evt, phase) => {
   // Removed - type: 'toolbar' handles transparency correctly
 })
@@ -1821,6 +2006,38 @@ ipcMain.on('toggle-hub-expansion', async (event, shouldExpand) => {
     await expandHub();
   } else {
     await collapseHub();
+  }
+});
+
+// Hide menu dots when LLM chat opens
+ipcMain.on('llm-chat-opened', () => {
+  console.log('💬 [MAIN] LLM chat opened - hiding menu dots');
+
+  if (visionToggleWindow && !visionToggleWindow.isDestroyed()) {
+    visionToggleWindow.hide();
+  }
+  if (forceButtonWindow && !forceButtonWindow.isDestroyed()) {
+    forceButtonWindow.hide();
+  }
+  if (dotWindow && !dotWindow.isDestroyed()) {
+    dotWindow.hide();
+  }
+});
+
+// Show menu dots when LLM chat closes
+ipcMain.on('llm-chat-closed', () => {
+  console.log('💬 [MAIN] LLM chat closed - showing menu dots');
+
+  if (isHubExpanded) {
+    if (visionToggleWindow && !visionToggleWindow.isDestroyed()) {
+      visionToggleWindow.show();
+    }
+    if (forceButtonWindow && !forceButtonWindow.isDestroyed()) {
+      forceButtonWindow.show();
+    }
+    if (dotWindow && !dotWindow.isDestroyed()) {
+      dotWindow.show();
+    }
   }
 });
 
