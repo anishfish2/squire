@@ -150,99 +150,102 @@ function SettingsApp() {
   }
 
   return (
-    <div className="w-full h-screen flex flex-col bg-white/[0.08] backdrop-blur-3xl border border-white/20 rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.5)]">
+    <div className="w-full h-screen flex flex-col bg-[#1a1a1a] text-white">
       {/* Header */}
-      <div className="flex items-center justify-between p-5 border-b border-white/10 [-webkit-app-region:drag]">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 [-webkit-app-region:drag]">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-white/10 rounded-lg flex items-center justify-center border border-white/20">
-            <span className="text-white text-base font-semibold">S</span>
+          <div className="w-9 h-9 bg-white/5 rounded-lg flex items-center justify-center border border-white/10">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white/80">
+              <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
+              <circle cx="12" cy="12" r="3"></circle>
+            </svg>
           </div>
           <div>
             <h1 className="text-white text-base font-semibold m-0">Settings</h1>
-            <p className="text-white/50 text-xs m-0">App permissions</p>
+            <p className="text-white/40 text-xs m-0 mt-0.5">App permissions</p>
           </div>
         </div>
         <button
           onClick={handleClose}
-          className="[-webkit-app-region:no-drag] w-7 h-7 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-white/70 hover:text-white transition-all cursor-pointer"
+          className="[-webkit-app-region:no-drag] w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-white/50 hover:text-white/90 transition-all cursor-pointer"
         >
           ✕
         </button>
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 overflow-y-auto p-5 custom-scrollbar">
+      <div className="flex-1 overflow-y-auto px-12 py-5 custom-scrollbar">
         {/* Global Controls */}
-        <div className="mb-4 bg-white/[0.06] rounded-xl p-4 border border-white/10">
-          <h2 className="text-white text-sm font-semibold mb-3 m-0">Quick Actions</h2>
+        <div className="mb-5 bg-white/5 rounded-xl p-5 border border-white/10">
+          <h2 className="text-white text-xs font-semibold mb-4 m-0 uppercase tracking-wide">Quick Actions</h2>
 
-          <div className="flex gap-2 flex-wrap">
+          <div className="grid grid-cols-2 gap-3 mb-4">
             <button
               onClick={() => handleEnableAll('ocr')}
-              className="px-3 py-1.5 bg-white/[0.06] hover:bg-white/[0.09] text-white/80 border border-white/10 hover:border-white/20 rounded-lg text-xs font-medium transition-all cursor-pointer"
+              className="px-3 py-2 bg-white/5 hover:bg-white/10 text-white/70 hover:text-white/90 border border-white/10 hover:border-white/20 rounded-lg text-xs font-medium transition-all cursor-pointer"
             >
               Enable All OCR
             </button>
             <button
               onClick={handleDisableAll}
-              className="px-3 py-1.5 bg-white/[0.06] hover:bg-white/[0.09] text-white/80 border border-white/10 hover:border-white/20 rounded-lg text-xs font-medium transition-all cursor-pointer"
+              className="px-3 py-2 bg-white/5 hover:bg-white/10 text-white/70 hover:text-white/90 border border-white/10 hover:border-white/20 rounded-lg text-xs font-medium transition-all cursor-pointer"
             >
               Disable All
             </button>
             <button
               onClick={() => handleEnableAll('vision')}
-              className="px-3 py-1.5 bg-white/[0.06] hover:bg-white/[0.09] text-white/80 border border-white/10 hover:border-white/20 rounded-lg text-xs font-medium transition-all cursor-pointer"
+              className="px-3 py-2 bg-white/5 hover:bg-white/10 text-white/70 hover:text-white/90 border border-white/10 hover:border-white/20 rounded-lg text-xs font-medium transition-all cursor-pointer"
             >
               Enable Vision (All)
             </button>
             <button
               onClick={handleRefresh}
               disabled={isRefreshing}
-              className="px-3 py-1.5 bg-white/[0.06] hover:bg-white/[0.09] text-white/80 border border-white/10 hover:border-white/20 rounded-lg text-xs font-medium transition-all cursor-pointer disabled:opacity-50"
+              className="px-3 py-2 bg-white/5 hover:bg-white/10 text-white/70 hover:text-white/90 border border-white/10 hover:border-white/20 rounded-lg text-xs font-medium transition-all cursor-pointer disabled:opacity-50"
             >
               {isRefreshing ? '🔄 Refreshing...' : '🔄 Refresh Apps'}
             </button>
           </div>
 
-          <div className="mt-3 pt-3 border-t border-white/10">
+          <div className="pt-4 border-t border-white/10">
             <div className="flex items-center justify-between text-xs">
-              <span className="text-white/70">Vision Feature</span>
-              <label className="relative inline-block w-11 h-6 [-webkit-app-region:no-drag] cursor-pointer">
+              <span className="text-white/60 font-medium">Vision Feature</span>
+              <label className="relative inline-block w-9 h-5 [-webkit-app-region:no-drag] cursor-pointer">
                 <input
                   type="checkbox"
                   checked={globalVisionEnabled}
                   onChange={handleGlobalVisionToggle}
                   className="sr-only peer"
                 />
-                <div className="w-full h-full bg-white/10 peer-checked:bg-white/20 rounded-full transition-all border border-white/20"></div>
-                <div className="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
+                <div className="w-full h-full bg-white/10 peer-checked:bg-blue-500/50 rounded-full transition-all border border-white/20"></div>
+                <div className="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></div>
               </label>
             </div>
-            <p className="text-white/40 text-xs mt-1.5 m-0">Enable vision analysis globally</p>
+            <p className="text-white/30 text-xs mt-2 m-0">Enable vision analysis globally</p>
           </div>
         </div>
 
         {/* Search Bar */}
-        <div className="mb-3">
+        <div className="mb-5">
           <input
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Search apps..."
-            className="w-full px-3 py-2 bg-white/[0.06] border border-white/10 rounded-lg text-white text-sm placeholder-white/40 focus:outline-none focus:border-white/20 focus:bg-white/[0.09] transition-all"
+            className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder-white/30 focus:outline-none focus:border-white/20 focus:bg-white/10 transition-all"
           />
         </div>
 
         {/* App List */}
-        <div className="space-y-2">
+        <div className="space-y-4">
           {filteredPreferences.length === 0 && appPreferences.length === 0 ? (
-            <div className="text-center py-12 text-white/40">
+            <div className="text-center py-12 text-white/30">
               <div className="text-4xl mb-3">📱</div>
-              <p className="text-sm">No apps detected yet</p>
-              <p className="text-xs mt-2">Switch between apps to populate this list</p>
+              <p className="text-sm font-medium">No apps detected yet</p>
+              <p className="text-xs mt-2 text-white/20">Switch between apps to populate this list</p>
             </div>
           ) : filteredPreferences.length === 0 ? (
-            <div className="text-center py-8 text-white/40">
+            <div className="text-center py-8 text-white/30">
               <p className="text-sm">No apps match "{searchTerm}"</p>
             </div>
           ) : (
@@ -259,13 +262,13 @@ function SettingsApp() {
       </div>
 
       {/* Footer Stats */}
-      <div className="p-3 border-t border-white/10 flex items-center justify-between text-xs">
-        <div className="flex gap-3 text-white/50">
-          <span>Total: <span className="text-white/80 font-medium">{stats.total}</span></span>
-          <span>OCR: <span className="text-white/80 font-medium">{stats.ocrEnabled}</span></span>
-          <span>Vision: <span className="text-white/80 font-medium">{stats.visionEnabled}</span></span>
+      <div className="px-12 py-3 border-t border-white/10 flex items-center justify-between text-xs">
+        <div className="flex gap-3 text-white/40">
+          <span>Total: <span className="text-white/70 font-medium">{stats.total}</span></span>
+          <span>OCR: <span className="text-white/70 font-medium">{stats.ocrEnabled}</span></span>
+          <span>Vision: <span className="text-white/70 font-medium">{stats.visionEnabled}</span></span>
         </div>
-        <div className="text-white/30 text-xs">
+        <div className="text-white/20 text-xs">
           <span>Last updated: {lastUpdated}</span>
         </div>
       </div>
@@ -275,72 +278,72 @@ function SettingsApp() {
 
 function AppCard({ preference, isActive, onToggle }) {
   return (
-    <div className="app-card bg-white/[0.06] hover:bg-white/[0.09] rounded-xl p-3 border border-white/10 transition-all">
-      <div className="flex items-center justify-between mb-2.5">
+    <div className="app-card bg-white/5 hover:bg-white/[0.08] rounded-xl p-4 border border-white/10 transition-all">
+      <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 bg-white/10 rounded-lg flex items-center justify-center text-sm border border-white/20">
+          <div className="w-7 h-7 bg-white/5 rounded-lg flex items-center justify-center text-sm border border-white/10">
             📱
           </div>
           <div>
             <h3 className="text-white font-medium text-sm m-0">{preference.app_name}</h3>
             {isActive ? (
-              <span className="text-white/50 text-xs">● Active</span>
+              <span className="text-green-400/70 text-xs">● Active</span>
             ) : (
-              <span className="text-white/30 text-xs">○</span>
+              <span className="text-white/20 text-xs">○ Inactive</span>
             )}
           </div>
         </div>
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-3">
         {/* OCR Toggle */}
         <div className="flex items-center justify-between">
-          <span className="text-white/70 text-xs">OCR</span>
-          <label className="relative inline-block w-11 h-6 cursor-pointer">
+          <span className="text-white/60 text-xs">OCR</span>
+          <label className="relative inline-block w-9 h-5 cursor-pointer">
             <input
               type="checkbox"
               checked={preference.allow_ocr}
               onChange={(e) => onToggle(preference.app_name, 'allow_ocr', e.target.checked)}
               className="sr-only peer"
             />
-            <div className="w-full h-full bg-white/10 peer-checked:bg-white/20 rounded-full transition-all border border-white/20"></div>
-            <div className="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
+            <div className="w-full h-full bg-white/10 peer-checked:bg-blue-500/50 rounded-full transition-all border border-white/20"></div>
+            <div className="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></div>
           </label>
         </div>
 
         {/* Vision Toggle */}
         <div className="flex items-center justify-between">
-          <span className="text-white/70 text-xs">Vision</span>
-          <label className="relative inline-block w-11 h-6 cursor-pointer">
+          <span className="text-white/60 text-xs">Vision</span>
+          <label className="relative inline-block w-9 h-5 cursor-pointer">
             <input
               type="checkbox"
               checked={preference.allow_vision}
               onChange={(e) => onToggle(preference.app_name, 'allow_vision', e.target.checked)}
               className="sr-only peer"
             />
-            <div className="w-full h-full bg-white/10 peer-checked:bg-white/20 rounded-full transition-all border border-white/20"></div>
-            <div className="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
+            <div className="w-full h-full bg-white/10 peer-checked:bg-blue-500/50 rounded-full transition-all border border-white/20"></div>
+            <div className="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></div>
           </label>
         </div>
 
         {/* Screenshot Storage Toggle */}
         <div className="flex items-center justify-between">
-          <span className="text-white/70 text-xs">Screenshots</span>
-          <label className="relative inline-block w-11 h-6 cursor-pointer">
+          <span className="text-white/60 text-xs">Screenshots</span>
+          <label className="relative inline-block w-9 h-5 cursor-pointer">
             <input
               type="checkbox"
               checked={preference.allow_screenshots}
               onChange={(e) => onToggle(preference.app_name, 'allow_screenshots', e.target.checked)}
               className="sr-only peer"
             />
-            <div className="w-full h-full bg-white/10 peer-checked:bg-white/20 rounded-full transition-all border border-white/20"></div>
-            <div className="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
+            <div className="w-full h-full bg-white/10 peer-checked:bg-blue-500/50 rounded-full transition-all border border-white/20"></div>
+            <div className="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></div>
           </label>
         </div>
       </div>
 
       {preference.allow_vision && (
-        <div className="mt-2 pt-2 border-t border-white/10 text-xs text-white/40">
+        <div className="mt-2 pt-2 border-t border-white/10 text-xs text-white/30">
           Vision costs: ~$0.01-0.03/image
         </div>
       )}

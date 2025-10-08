@@ -456,23 +456,28 @@ function LLMChatApp() {
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
-      // Cmd+Shift+V - Toggle Vision
-      if (e.metaKey && e.shiftKey && e.key === 'V') {
+      // Cmd+Option+V - Toggle Vision
+      if (e.metaKey && e.altKey && e.key === 'v') {
         e.preventDefault()
         toggleVision()
       }
-      // Cmd+Shift+F - Force Suggestions
-      else if (e.metaKey && e.shiftKey && e.key === 'F') {
+      // Cmd+Option+F - Force Suggestions
+      else if (e.metaKey && e.altKey && e.key === 'f') {
         e.preventDefault()
         forceSuggestions()
       }
-      // Cmd+Shift+M - Toggle collapse/minimize to bar
-      else if (e.metaKey && e.shiftKey && e.key === 'M') {
+      // Cmd+Option+M - Toggle collapse/minimize to bar
+      else if (e.metaKey && e.altKey && e.key === 'm') {
         e.preventDefault()
         toggleCollapse()
       }
-      // Cmd+W or Escape - Close window
-      else if ((e.metaKey && e.key === 'w') || e.key === 'Escape') {
+      // Cmd+Option+S - Open Settings
+      else if (e.metaKey && e.altKey && e.key === 's') {
+        e.preventDefault()
+        ipcRenderer.send('toggle-settings', true)
+      }
+      // Cmd+Option+W or Escape - Close window
+      else if ((e.metaKey && e.altKey && e.key === 'w') || e.key === 'Escape') {
         e.preventDefault()
         ipcRenderer.send('toggle-hub-expansion', false)
         setTimeout(() => {
@@ -481,8 +486,30 @@ function LLMChatApp() {
       }
     }
 
+    // Listen for global shortcut events from main process
+    const handleGlobalVisionToggle = () => toggleVision()
+    const handleForceSuggestions = () => forceSuggestions()
+    const handleToggleCollapse = () => toggleCollapse()
+    const handleCloseWindow = () => {
+      ipcRenderer.send('toggle-hub-expansion', false)
+      setTimeout(() => {
+        ipcRenderer.send('toggle-llm-chat', false)
+      }, 100)
+    }
+
+    ipcRenderer.on('global-vision-toggle', handleGlobalVisionToggle)
+    ipcRenderer.on('force-suggestions-request', handleForceSuggestions)
+    ipcRenderer.on('toggle-collapse-request', handleToggleCollapse)
+    ipcRenderer.on('close-window-request', handleCloseWindow)
+
     window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      ipcRenderer.removeListener('global-vision-toggle', handleGlobalVisionToggle)
+      ipcRenderer.removeListener('force-suggestions-request', handleForceSuggestions)
+      ipcRenderer.removeListener('toggle-collapse-request', handleToggleCollapse)
+      ipcRenderer.removeListener('close-window-request', handleCloseWindow)
+    }
   }, [visionEnabled, isCollapsed])
 
   // Collapsed view - minimal bar
@@ -716,7 +743,7 @@ function LLMChatApp() {
           </div>
         </div>
         <div className="flex items-center gap-1">
-          <Tooltip text="Vision" hotkey="⌘⇧V" show={hoveredButton === 'vision'}>
+          <Tooltip text="Vision" hotkey="⌘⌥V" show={hoveredButton === 'vision'}>
             <button
               onClick={toggleVision}
               onMouseEnter={() => setHoveredButton('vision')}
@@ -744,7 +771,7 @@ function LLMChatApp() {
               )}
             </button>
           </Tooltip>
-          <Tooltip text="Suggest" hotkey="⌘⇧F" show={hoveredButton === 'suggest'}>
+          <Tooltip text="Suggest" hotkey="⌘⌥F" show={hoveredButton === 'suggest'}>
             <button
               onClick={forceSuggestions}
               onMouseEnter={() => setHoveredButton('suggest')}
@@ -775,6 +802,23 @@ function LLMChatApp() {
                 <path d="M3 6h18"></path>
                 <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
                 <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+              </svg>
+            </button>
+          </Tooltip>
+          <Tooltip text="Settings" hotkey="⌘⌥S" show={hoveredButton === 'settings'}>
+            <button
+              onClick={() => ipcRenderer.send('toggle-settings', true)}
+              onMouseEnter={() => setHoveredButton('settings')}
+              onMouseLeave={() => setHoveredButton(null)}
+              style={{
+                borderRadius: '20px',
+                transition: 'all 130ms ease-out'
+              }}
+              className="w-7 h-7 text-white/50 hover:text-white/90 hover:bg-white/10 flex items-center justify-center"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M12 1v6m0 6v6m9-9h-6m-6 0H3"></path>
               </svg>
             </button>
           </Tooltip>
@@ -829,13 +873,13 @@ function LLMChatApp() {
           </div>
 
           {/* Input area */}
-          <div className="p-4 border-t" style={{
+          <div className="p-5 border-t" style={{
             background: 'rgba(30, 41, 59, 0.95)',
             borderTopColor: 'rgba(71, 85, 105, 0.3)'
           }}>
             {/* Screenshot previews */}
             {screenshots.length > 0 && (
-              <div className="mb-3 flex gap-2 flex-wrap">
+              <div className="mb-4 flex gap-2 flex-wrap">
                 {screenshots.map(screenshot => (
                   <div key={screenshot.id} className="relative group">
                     <img
@@ -857,7 +901,7 @@ function LLMChatApp() {
               </div>
             )}
 
-            <div className="flex gap-2 items-end">
+            <div className="flex gap-3 items-end">
               <div className="flex-1">
                 <input
                   type="text"
@@ -865,20 +909,20 @@ function LLMChatApp() {
                   onChange={(e) => setInput(e.target.value)}
                   onKeyPress={handleKeyPress}
                   placeholder="Type to ask... ⌘↵"
-                  className="w-full text-white text-sm px-4 py-2.5 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-white/40 transition-all"
+                  className="w-full text-white text-sm px-4 py-3 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-white/40 transition-all"
                   style={{
                     background: 'rgba(51, 65, 85, 0.3)',
                     border: '1px solid rgba(71, 85, 105, 0.25)',
                     borderRadius: '14px',
-                    height: '42px',
+                    height: '44px',
                     fontWeight: '500'
                   }}
                   disabled={isLoading}
                 />
-                <div className="flex items-center justify-between mt-2">
+                <div className="flex items-center justify-between mt-3">
                   <button
                     onClick={captureScreenshot}
-                    className="text-white/40 hover:text-white/90 text-xs transition-all flex items-center gap-2"
+                    className="text-white/40 hover:text-white/90 text-xs transition-all flex items-center gap-2.5"
                     title="Capture screenshot"
                   >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -890,7 +934,7 @@ function LLMChatApp() {
                   <select
                     value={selectedModel}
                     onChange={(e) => setSelectedModel(e.target.value)}
-                    className="text-white/70 text-[10px] px-2 py-1 rounded focus:outline-none focus:ring-1 focus:ring-blue-500/50 cursor-pointer transition-all"
+                    className="text-white/70 text-[10px] px-2.5 py-1.5 rounded focus:outline-none focus:ring-1 focus:ring-blue-500/50 cursor-pointer transition-all"
                     style={{
                       background: 'rgba(51, 65, 85, 0.3)',
                       border: '1px solid rgba(71, 85, 105, 0.25)',
@@ -913,7 +957,7 @@ function LLMChatApp() {
                     transition: 'all 130ms ease-out',
                     boxShadow: '0 2px 8px rgba(239, 68, 68, 0.2)'
                   }}
-                  className="px-4 py-2.5 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold flex items-center gap-2"
+                  className="px-5 py-3 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold flex items-center gap-2"
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                     <rect x="6" y="6" width="12" height="12"></rect>
@@ -929,7 +973,7 @@ function LLMChatApp() {
                     transition: 'all 130ms ease-out',
                     boxShadow: !input.trim() ? 'none' : '0 2px 8px rgba(59, 130, 246, 0.25)'
                   }}
-                  className="px-4 py-2.5 bg-blue-500 hover:bg-blue-600 text-white text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-blue-500 flex items-center gap-2"
+                  className="px-5 py-3 bg-blue-500 hover:bg-blue-600 text-white text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-blue-500 flex items-center gap-2"
                 >
                   <span>Send</span>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

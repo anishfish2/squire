@@ -41,13 +41,13 @@ export default defineConfig({
         input: {
           debug: resolve(__dirname, 'src/renderer/debug/index.html'),
           settings: resolve(__dirname, 'src/renderer/settings/index.html'),
-          dot: resolve(__dirname, 'src/renderer/dot/index.html'),
           'suggestions-box': resolve(__dirname, 'src/renderer/suggestions-box/index.html'),
           'force-button': resolve(__dirname, 'src/renderer/force-button/index.html'),
           'llm-dot': resolve(__dirname, 'src/renderer/llm-dot/index.html'),
           'llm-chat': resolve(__dirname, 'src/renderer/llm-chat/index.html'),
           'vision-toggle': resolve(__dirname, 'src/renderer/vision-toggle/index.html'),
           'hub-dot': resolve(__dirname, 'src/renderer/hub-dot/index.html'),
+          'settings-dot': resolve(__dirname, 'src/renderer/settings-dot/index.html'),
           'screenshot-overlay': resolve(__dirname, 'src/renderer/screenshot-overlay/index.html')
         }
       }
