@@ -74,6 +74,7 @@ function LLMChatApp() {
   const abortControllerRef = useRef(null)
 
   const [isVisible, setIsVisible] = useState(false)
+  const [isWindowOpen, setIsWindowOpen] = useState(false)
   const [screenshots, setScreenshots] = useState([])
   const [visionEnabled, setVisionEnabled] = useState(true)
   const fileInputRef = useRef(null)
@@ -124,6 +125,7 @@ function LLMChatApp() {
   // Slide in animation on mount
   useEffect(() => {
     setTimeout(() => setIsVisible(true), 100)
+    setIsWindowOpen(true) // Window is open on mount
 
     // Get initial vision state
     ipcRenderer.invoke('get-vision-state').then(state => {
@@ -135,6 +137,16 @@ function LLMChatApp() {
       setVisionEnabled(newState)
     }
     ipcRenderer.on('vision-state-changed', handleVisionStateChange)
+
+    // Listen for window show/hide events
+    const handleWindowShow = () => {
+      setIsWindowOpen(true)
+    }
+    const handleWindowHide = () => {
+      setIsWindowOpen(false)
+    }
+    ipcRenderer.on('llm-chat-window-shown', handleWindowShow)
+    ipcRenderer.on('llm-chat-window-hidden', handleWindowHide)
 
     // Listen for AI suggestions
     const handleAISuggestions = (event, data) => {
@@ -151,32 +163,34 @@ function LLMChatApp() {
         setSuggestions(prev => [...newSuggestions, ...prev])
         setUnreadCount(prev => prev + newSuggestions.length)
 
-        // Check if window is visible
-        const windowVisible = isVisible
+        // Get current window state - use a ref to get the latest value
+        ipcRenderer.invoke('is-llm-chat-open').then(isOpen => {
+          if (!isOpen) {
+            // Show notification only if window is not open
+            const firstSuggestion = newSuggestions[0]
+            setSuggestionNotification({
+              title: firstSuggestion.title || firstSuggestion.action || 'New Suggestion',
+              description: firstSuggestion.description || firstSuggestion.content?.description || '',
+              count: newSuggestions.length
+            })
 
-        if (!windowVisible) {
-          // Show notification for the first suggestion
-          const firstSuggestion = newSuggestions[0]
-          setSuggestionNotification({
-            title: firstSuggestion.title || firstSuggestion.action || 'New Suggestion',
-            description: firstSuggestion.description || firstSuggestion.content?.description || '',
-            count: newSuggestions.length
-          })
-
-          // Auto-hide notification after 10 seconds
-          setTimeout(() => {
-            setSuggestionNotification(null)
-          }, 10000)
-        } else {
-          // Switch to suggestions tab if window is visible
-          setActiveTab('suggestions')
-        }
+            // Auto-hide notification after 10 seconds
+            setTimeout(() => {
+              setSuggestionNotification(null)
+            }, 10000)
+          } else {
+            // Switch to suggestions tab if window is visible
+            setActiveTab('suggestions')
+          }
+        })
       }
     }
     ipcRenderer.on('ai-suggestions', handleAISuggestions)
 
     return () => {
       ipcRenderer.removeListener('vision-state-changed', handleVisionStateChange)
+      ipcRenderer.removeListener('llm-chat-window-shown', handleWindowShow)
+      ipcRenderer.removeListener('llm-chat-window-hidden', handleWindowHide)
       ipcRenderer.removeListener('ai-suggestions', handleAISuggestions)
     }
   }, [])

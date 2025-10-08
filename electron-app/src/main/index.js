@@ -1570,9 +1570,13 @@ ipcMain.on("toggle-llm-chat", (event, show) => {
       llmChatWindow.setAlwaysOnTop(true, "pop-up-menu");
       llmChatWindow.show();
       llmChatWindow.focus();
+      // Notify renderer that window is shown
+      llmChatWindow.webContents.send('llm-chat-window-shown');
     } else {
       llmChatWindow.hide();
       llmChatWindow.setAlwaysOnTop(true, "screen-saver");
+      // Notify renderer that window is hidden
+      llmChatWindow.webContents.send('llm-chat-window-hidden');
 
       // Show menu dots if hub is expanded and restore their always-on-top
       console.log('💬 [MAIN] Chat closed. isHubExpanded:', isHubExpanded);
@@ -1632,6 +1636,11 @@ ipcMain.on('suggestions-read', () => {
   if (hubDotWindow && !hubDotWindow.isDestroyed()) {
     hubDotWindow.webContents.send('unread-suggestions-count', 0);
   }
+});
+
+// Check if LLM chat is open
+ipcMain.handle('is-llm-chat-open', () => {
+  return isChatOpen;
 });
 
 ipcMain.on("move-llm-dot-window", (event, x, y) => {
