@@ -584,7 +584,7 @@ function createDotWindow() {
       visibleOnFullScreen: true,
       skipTransformProcessType: true,
     });
-    dotWindow.show();
+    // Don't show - will be shown when hub expands
     // dotWindow.webContents.openDevTools({ mode: 'detach' });
   });
 
@@ -662,7 +662,7 @@ function createForceButtonWindow() {
   }
 
   forceButtonWindow.once("ready-to-show", () => {
-    forceButtonWindow.show();
+    // Don't show - will be shown when hub expands
     forceButtonWindow.setAlwaysOnTop(true, "screen-saver");
     forceButtonWindow.setVisibleOnAllWorkspaces(true, {
       visibleOnFullScreen: true,
@@ -706,12 +706,12 @@ function createLLMDotWindow() {
   }
 
   llmDotWindow.once("ready-to-show", () => {
+    // Don't show - will be shown when hub expands
     llmDotWindow.setAlwaysOnTop(true, "screen-saver");
     llmDotWindow.setVisibleOnAllWorkspaces(true, {
       visibleOnFullScreen: true,
       skipTransformProcessType: true,
     });
-    llmDotWindow.show();
     // llmDotWindow.webContents.openDevTools({ mode: 'detach' });
   });
 
@@ -795,12 +795,12 @@ function createVisionToggleWindow() {
   }
 
   visionToggleWindow.once("ready-to-show", () => {
+    // Don't show - will be shown when hub expands
     visionToggleWindow.setAlwaysOnTop(true, "screen-saver");
     visionToggleWindow.setVisibleOnAllWorkspaces(true, {
       visibleOnFullScreen: true,
       skipTransformProcessType: true,
     });
-    visionToggleWindow.show();
     // visionToggleWindow.webContents.openDevTools({ mode: 'detach' });
   });
 

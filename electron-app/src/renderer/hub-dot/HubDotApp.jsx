@@ -63,45 +63,11 @@ const HubDotApp = () => {
           ipcRenderer.send('set-hub-dot-click-through', true)
         }}
       >
-        {/* Menu icon - three dots arranged vertically */}
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '4px',
-            alignItems: 'center',
-            transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
-            transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
-          }}
-        >
-          <div
-            style={{
-              width: '6px',
-              height: '6px',
-              borderRadius: '50%',
-              background: 'white',
-              opacity: 0.9
-            }}
-          />
-          <div
-            style={{
-              width: '6px',
-              height: '6px',
-              borderRadius: '50%',
-              background: 'white',
-              opacity: 0.9
-            }}
-          />
-          <div
-            style={{
-              width: '6px',
-              height: '6px',
-              borderRadius: '50%',
-              background: 'white',
-              opacity: 0.9
-            }}
-          />
-        </div>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.9, transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.3s ease' }}>
+          <circle cx="12" cy="5" r="1" fill="white"></circle>
+          <circle cx="12" cy="12" r="1" fill="white"></circle>
+          <circle cx="12" cy="19" r="1" fill="white"></circle>
+        </svg>
       </div>
     </div>
   )
