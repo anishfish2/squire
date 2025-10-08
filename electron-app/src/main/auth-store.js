@@ -25,10 +25,63 @@ class AuthStore {
       if (fs.existsSync(this.storePath)) {
         const data = fs.readFileSync(this.storePath, 'utf8')
         this.store = JSON.parse(data)
+
+        // Initialize memory variables from stored data
+        if (this.store.user) {
+          this.currentUser = this.store.user
+          console.log('✅ [AuthStore] Loaded user from disk:', this.currentUser.email)
+        }
+
+        // Don't decrypt tokens here - let getAccessToken() and getRefreshToken() do it lazily
+        // This avoids issues with safeStorage not being ready yet
+
+        // Schedule token refresh check after app is ready
+        // This ensures tokens are fresh on startup
+        setTimeout(() => {
+          this.checkAndRefreshToken().catch(err => {
+            console.error('❌ [AuthStore] Failed to refresh token on startup:', err)
+          })
+        }, 1000)
       }
     } catch (error) {
       console.error('Failed to load auth store:', error)
       this.store = {}
+    }
+  }
+
+  /**
+   * Check if token needs refresh and refresh if necessary
+   */
+  async checkAndRefreshToken() {
+    const token = this.getAccessToken()
+    if (!token) return
+
+    try {
+      // Try to decode the token to check expiration
+      // Note: This is a simple check, not cryptographically secure
+      const parts = token.split('.')
+      if (parts.length === 3) {
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString())
+        const expiresAt = payload.exp * 1000 // Convert to milliseconds
+        const now = Date.now()
+        const timeUntilExpiry = expiresAt - now
+
+        console.log(`🔑 [AuthStore] Token expires in ${Math.floor(timeUntilExpiry / 1000 / 60)} minutes`)
+
+        // Refresh if token expires in less than 5 minutes or is already expired
+        if (timeUntilExpiry < 5 * 60 * 1000) {
+          console.log('🔄 [AuthStore] Token expired or expiring soon, refreshing...')
+          await this.refreshAccessToken()
+        }
+      }
+    } catch (error) {
+      console.error('❌ [AuthStore] Error checking token expiry:', error)
+      // If we can't decode the token, try to refresh it anyway
+      try {
+        await this.refreshAccessToken()
+      } catch (refreshError) {
+        console.error('❌ [AuthStore] Token refresh failed:', refreshError)
+      }
     }
   }
 
@@ -91,21 +144,38 @@ class AuthStore {
    */
   getAccessToken() {
     try {
-      if (this.accessToken) return this.accessToken
+      if (this.accessToken) {
+        console.log('🔑 [AuthStore] Returning cached access token');
+        return this.accessToken;
+      }
 
       const stored = this.get('access_token')
-      if (!stored) return null
+      if (!stored) {
+        console.error('❌ [AuthStore] No access token stored!');
+        console.error('❌ [AuthStore] Store keys:', Object.keys(this.store));
+        return null;
+      }
+
+      console.log('🔑 [AuthStore] Found stored token, decrypting...');
+      console.log('🔑 [AuthStore] Encryption available:', safeStorage.isEncryptionAvailable());
 
       if (safeStorage.isEncryptionAvailable()) {
-        const buffer = Buffer.from(stored, 'base64')
-        this.accessToken = safeStorage.decryptString(buffer)
+        try {
+          const buffer = Buffer.from(stored, 'base64')
+          this.accessToken = safeStorage.decryptString(buffer)
+          console.log('✅ [AuthStore] Token decrypted successfully, length:', this.accessToken?.length);
+        } catch (decryptError) {
+          console.error('❌ [AuthStore] Decryption failed:', decryptError);
+          return null;
+        }
       } else {
         this.accessToken = stored
+        console.log('✅ [AuthStore] Using unencrypted token');
       }
 
       return this.accessToken
     } catch (error) {
-      console.error('❌ Error getting access token:', error)
+      console.error('❌ [AuthStore] Error getting access token:', error)
       return null
     }
   }

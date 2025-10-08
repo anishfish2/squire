@@ -201,10 +201,20 @@ class OCRManager {
       }));
 
 
+      // Get auth token
+      const token = authStore.getAccessToken();
+      console.log('🔑 [OCRManager] Token available:', !!token);
+      const formHeaders = form.getHeaders();
+      if (token) {
+        formHeaders['Authorization'] = `Bearer ${token}`;
+      } else {
+        console.error('❌ [OCRManager] No auth token available!');
+      }
+
       const response = await this.makeHttpRequest(`${this.backendUrl}/api/ai/ocr/queue/context`, {
         method: 'POST',
         body: form,
-        headers: form.getHeaders()
+        headers: formHeaders
       });
 
       return response.job_id;

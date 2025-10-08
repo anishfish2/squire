@@ -1,10 +1,11 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 import uuid
 
 from app.core.database import supabase
+from app.middleware.auth import get_current_user, jwt_bearer
 
 router = APIRouter()
 
@@ -16,7 +17,7 @@ class ActivityEvent(BaseModel):
     details: Dict[str, Any] = Field(default_factory=dict, description="Additional event details")
 
 class ActivityBatchRequest(BaseModel):
-    user_id: str = Field(..., description="User ID")
+    user_id: Optional[str] = Field(None, description="User ID (optional - will be extracted from JWT)")
     session_id: Optional[str] = Field(None, description="Current session ID")
     events: List[ActivityEvent] = Field(..., description="Batch of activity events")
 
@@ -66,8 +67,14 @@ async def get_current_session(user_id: str):
         raise HTTPException(status_code=500, detail=f"Failed to get current session: {str(e)}")
 
 @router.post("/activity-batch")
-async def store_activity_batch(activity_data: ActivityBatchRequest):
+async def store_activity_batch(
+    request: Request,
+    activity_data: ActivityBatchRequest,
+    token: str = Depends(jwt_bearer)
+):
     try:
+        # Get user_id from request state (populated by jwt_bearer)
+        user_id = request.state.user_id
         events_to_insert = []
 
         for event in activity_data.events:
@@ -85,7 +92,7 @@ async def store_activity_batch(activity_data: ActivityBatchRequest):
 
             event_record = {
                 "id": str(uuid.uuid4()),
-                "user_id": activity_data.user_id,
+                "user_id": user_id,
                 "event_type": "interaction",
                 "event_data": {
                     "action": event.action,
@@ -156,6 +163,18 @@ async def store_session_stats(stats_data: SessionStatsRequest):
 @router.post("/profiles")
 async def create_profile(profile_data: ProfileCreateRequest):
     try:
+        # Check if profile already exists
+        existing = supabase.table("user_profiles").select("id").eq("id", profile_data.id).execute()
+
+        if existing.data and len(existing.data) > 0:
+            # Profile already exists, just return success
+            return {
+                "status": "success",
+                "message": "Profile already exists",
+                "profile_id": profile_data.id
+            }
+
+        # Profile doesn't exist, create it
         result = supabase.table("user_profiles").insert({
             "id": profile_data.id,
             "email": profile_data.email,
@@ -193,6 +212,16 @@ async def create_profile(profile_data: ProfileCreateRequest):
 @router.post("/sessions")
 async def create_session(session_data: SessionCreateRequest):
     try:
+        # Check if session already exists
+        existing = supabase.table("user_sessions").select("id").eq("id", session_data.id).execute()
+
+        if existing.data and len(existing.data) > 0:
+            # Session already exists, just return success
+            return {
+                "status": "success",
+                "message": "Session already exists",
+                "session_id": session_data.id
+            }
 
         result = supabase.table("user_sessions").insert({
             "id": session_data.id,

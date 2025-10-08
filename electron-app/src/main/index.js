@@ -1116,14 +1116,23 @@ async function processKeystrokeSequence(sequenceData) {
   console.log(`📤 [KeystrokeCollector] Sending keystroke analysis (Vision: ${visionScheduler ? visionScheduler.globalVisionEnabled : 'unknown'})`);
 
   try {
+    // Get auth token for API call
+    const token = authStore.getAccessToken();
+    console.log('🔑 [Keystroke] Token available:', !!token);
+    const headers = {
+      'Content-Type': 'application/json',
+    };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    } else {
+      console.error('❌ [Keystroke] No auth token available!');
+    }
 
     const response = await fetch('http://127.0.0.1:8000/api/ai/keystroke-analysis', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: headers,
       body: JSON.stringify({
-        user_id: currentUserId,
+        // user_id no longer needed - comes from auth token
         sequence_data: sequenceData,
         session_context: {
           current_activity: recentActivityData,

@@ -436,11 +436,14 @@ class ComprehensiveActivityTracker {
 
       // Get auth token for API call
       const token = authStore.getAccessToken();
+      console.log('🔑 [ActivityTracker] Token available:', !!token);
       const headers = {
         "Content-Type": "application/json",
       };
       if (token) {
         headers["Authorization"] = `Bearer ${token}`;
+      } else {
+        console.error('❌ [ActivityTracker] No auth token available!');
       }
 
       const response = await fetch(

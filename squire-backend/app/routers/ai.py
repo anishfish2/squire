@@ -1,7 +1,7 @@
 """
 AI Service routes for OpenAI integration
 """
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Request
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import openai
@@ -11,6 +11,7 @@ from datetime import datetime
 from uuid import UUID, uuid4
 
 from app.core.database import get_supabase, execute_query, DatabaseError
+from app.middleware.auth import get_current_user, jwt_bearer
 from app.services.ocr_service import PaddleOCRService
 from app.services.keystroke_analysis_service import KeystrokeAnalysisService
 from app.services.ocr_job_manager import OCRJobManager, JobPriority
@@ -1710,18 +1711,22 @@ async def save_context_data(request: AIContextRequest, suggestions: List[AISugge
 
 @router.post("/ocr/queue/context")
 async def queue_ocr_with_context(
+    request: Request,
     file: UploadFile = File(...),
-    user_id: str = Form(""),
     session_id: str = Form(""),
     app_name: str = Form(""),
     window_title: str = Form(""),
     bundle_id: str = Form(""),
     priority: str = Form("normal"),
-    session_context: str = Form("{}")
+    session_context: str = Form("{}"),
+    token: str = Depends(jwt_bearer)
 ):
     """Queue OCR processing job with application context"""
     try:
         import json
+
+        # Get user_id from request state (populated by jwt_bearer)
+        user_id = request.state.user_id
 
         # Read image data
         image_data = await file.read()
@@ -1736,9 +1741,9 @@ async def queue_ocr_with_context(
         if not session_id or session_id.strip() == "":
             session_id = str(uuid4())
 
-        # Build app context
+        # Build app context - use user_id from JWT token
         app_context = {
-            "user_id": user_id or "unknown",
+            "user_id": user_id,
             "session_id": session_id,
             "app_name": app_name or "Unknown",
             "window_title": window_title or "",
@@ -1954,15 +1959,20 @@ async def get_ocr_queue_stats():
 
 
 @router.post("/keystroke-analysis")
-async def process_keystroke_analysis(request: dict):
+async def process_keystroke_analysis(
+    req: Request,
+    request: dict,
+    token: str = Depends(jwt_bearer)
+):
     """Process keystroke sequence and analyze patterns"""
     try:
-        user_id = request.get('user_id')
+        # Get user_id from request state (populated by jwt_bearer)
+        user_id = req.state.user_id
         sequence_data = request.get('sequence_data', {})
         session_context = request.get('session_context', {})
 
-        if not user_id or not sequence_data:
-            raise HTTPException(status_code=400, detail="user_id and sequence_data required")
+        if not sequence_data:
+            raise HTTPException(status_code=400, detail="sequence_data required")
 
         result = await keystroke_analysis_service.process_keystroke_sequence(
             user_id, sequence_data, session_context
