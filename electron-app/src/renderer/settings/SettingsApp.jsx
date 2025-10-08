@@ -10,6 +10,7 @@ function SettingsApp() {
   const [lastUpdated, setLastUpdated] = useState('Never')
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [preferencesLoaded, setPreferencesLoaded] = useState(false)
+  const [user, setUser] = useState(null)
 
   // Load initial data
   useEffect(() => {
@@ -80,6 +81,19 @@ function SettingsApp() {
       ipcRenderer.removeListener('app-detected', handleAppDetected)
     }
   }, [preferencesLoaded])
+
+  // Load user data
+  useEffect(() => {
+    ipcRenderer.invoke('auth-check').then(({ user }) => {
+      setUser(user)
+    })
+  }, [])
+
+  const handleLogout = () => {
+    if (confirm('Are you sure you want to log out?')) {
+      ipcRenderer.send('auth-signout')
+    }
+  }
 
   const updateLastUpdated = useCallback(() => {
     const now = new Date()
@@ -175,6 +189,26 @@ function SettingsApp() {
 
       {/* Main Content */}
       <div className="flex-1 overflow-y-auto px-12 py-5 custom-scrollbar">
+        {/* User Profile Section */}
+        {user && (
+          <div className="mb-5 bg-white/5 rounded-xl p-5 border border-white/10">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-white font-semibold text-sm m-0">
+                  {user.user_metadata?.name || user.email}
+                </h3>
+                <p className="text-white/60 text-xs m-0 mt-1">{user.email}</p>
+              </div>
+              <button
+                onClick={handleLogout}
+                className="[-webkit-app-region:no-drag] px-4 py-2 text-sm text-red-400 hover:bg-red-500/10 rounded-lg transition-all cursor-pointer border border-red-500/20 hover:border-red-500/40"
+              >
+                Log Out
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Global Controls */}
         <div className="mb-5 bg-white/5 rounded-xl p-5 border border-white/10">
           <h2 className="text-white text-xs font-semibold mb-4 m-0 uppercase tracking-wide">Quick Actions</h2>

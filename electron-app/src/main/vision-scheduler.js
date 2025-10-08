@@ -2,6 +2,7 @@
 import { desktopCapturer, screen } from 'electron'
 import FormData from 'form-data'
 import axios from 'axios'
+import authStore from './auth-store.js'
 
 class VisionScheduler {
   constructor(backendUrl, userId, sessionId) {
@@ -86,7 +87,22 @@ class VisionScheduler {
    */
   async loadAppPreferences() {
     try {
-      const response = await fetch(`${this.backendUrl}/api/vision/preferences/${this.userId}`);
+      // Get auth token and user for API call
+      const token = authStore.getAccessToken();
+      const user = authStore.getUser();
+      if (!user?.id) {
+        console.error('📸 [VisionScheduler] ❌ No user ID available');
+        return;
+      }
+
+      const headers = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const response = await fetch(`${this.backendUrl}/api/vision/preferences/${user.id}`, {
+        headers: headers
+      });
 
       if (response.ok) {
         const prefs = await response.json();
@@ -112,7 +128,22 @@ class VisionScheduler {
    */
   async refreshAppPreference(appName) {
     try {
-      const response = await fetch(`${this.backendUrl}/api/vision/preferences/${this.userId}`);
+      // Get auth token and user for API call
+      const token = authStore.getAccessToken();
+      const user = authStore.getUser();
+      if (!user?.id) {
+        console.error('📸 [VisionScheduler] ❌ No user ID available');
+        return;
+      }
+
+      const headers = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const response = await fetch(`${this.backendUrl}/api/vision/preferences/${user.id}`, {
+        headers: headers
+      });
 
       if (response.ok) {
         const prefs = await response.json();
@@ -273,14 +304,22 @@ class VisionScheduler {
       formData.append('session_id', this.sessionId);
       formData.append('allow_screenshots', String(allowScreenshots));
 
-      const uploadUrl = `${this.backendUrl}/api/vision/jobs/${this.userId}`;
+      // userId is no longer needed in URL - comes from auth token
+      const uploadUrl = `${this.backendUrl}/api/vision/jobs`;
 
       console.log(`📸 [VisionScheduler] Capturing for: ${this.currentApp}`);
+
+      // Get auth token for API call
+      const token = authStore.getAccessToken();
+      const headers = formData.getHeaders();
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
 
       // Send to backend using axios (handles FormData properly)
       const startTime = Date.now();
       const response = await axios.post(uploadUrl, formData, {
-        headers: formData.getHeaders(),
+        headers: headers,
         maxContentLength: Infinity,
         maxBodyLength: Infinity
       });

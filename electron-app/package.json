@@ -39,6 +39,7 @@
     "@paymoapp/active-window": "^2.1.2",
     "active-win": "^8.0.0",
     "axios": "^1.12.2",
+    "electron-store": "^11.0.2",
     "form-data": "^4.0.4",
     "node-global-key-listener": "^0.3.0",
     "node-mac-permissions": "^2.5.0",

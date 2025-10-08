@@ -1,7 +1,8 @@
 import { app, BrowserWindow, screen, ipcMain, Menu, dialog, systemPreferences, globalShortcut, desktopCapturer } from 'electron'
 import path from 'path'
 import { fileURLToPath } from 'url'
-
+import authStore from './auth-store.js'
+import axios from 'axios'
 import process from 'process';
 import OCRManager from './ocr-manager.js'
 import ActiveAppTracker from './app-tracker.js'
@@ -23,7 +24,9 @@ let llmDotWindow;
 let llmChatWindow;
 let visionToggleWindow;
 let hubDotWindow;
+let quitDotWindow;
 let screenshotOverlayWindow;
+let authWindow;
 let ocrManager;
 let appTracker;
 let activityTracker;
@@ -35,8 +38,17 @@ let skipNextOCR = false;
 let smartOCRScheduler = null;
 let ocrBatchManager = null;
 
-let currentUserId = "550e8400-e29b-41d4-a716-446655440000";
+let currentUserId = null;  // Will be set after auth
 let currentSessionId = null;
+
+// Helper function to get userId
+function getCurrentUserId() {
+  if (!currentUserId) {
+    const user = authStore.getUser()
+    currentUserId = user?.id || null
+  }
+  return currentUserId
+}
 
 // Track detected apps for settings UI
 let detectedApps = new Set();
@@ -821,6 +833,50 @@ function createSettingsDotWindow() {
   return settingsDotWindow;
 }
 
+function createQuitDotWindow() {
+  const { width } = screen.getPrimaryDisplay().workAreaSize;
+
+  quitDotWindow = new BrowserWindow({
+    width: 150,
+    height: 150,
+    x: width - 127,
+    y: 337, // Position below settings dot (267)
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: true,
+    skipTaskbar: true,
+    acceptFirstMouse: true,
+    fullscreenable: false,
+    alwaysOnTop: true,
+    type: 'panel',
+    show: false,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+      backgroundThrottling: false,
+    },
+  });
+
+  if (process.env.VITE_DEV_SERVER_URL) {
+    quitDotWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}/quit-dot/index.html`);
+  } else {
+    quitDotWindow.loadFile(path.join(__dirname, '../renderer/quit-dot/index.html'));
+  }
+
+  quitDotWindow.once("ready-to-show", () => {
+    // Don't show - will be shown when hub expands
+    quitDotWindow.setAlwaysOnTop(true, "screen-saver");
+    quitDotWindow.setVisibleOnAllWorkspaces(true, {
+      visibleOnFullScreen: true,
+      skipTransformProcessType: true,
+    });
+    // quitDotWindow.webContents.openDevTools({ mode: 'detach' });
+  });
+
+  return quitDotWindow;
+}
+
 function createHubDotWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
 
@@ -907,6 +963,7 @@ function createSuggestionsWindow() {
   createLLMChatWindow();
   createVisionToggleWindow();
   createSettingsDotWindow();
+  createQuitDotWindow();
   createHubDotWindow();
 
   // Initially hide all dots (they'll be collapsed behind the hub)
@@ -914,6 +971,7 @@ function createSuggestionsWindow() {
   if (llmDotWindow) llmDotWindow.hide();
   if (visionToggleWindow) visionToggleWindow.hide();
   if (settingsDotWindow) settingsDotWindow.hide();
+  if (quitDotWindow) quitDotWindow.hide();
 }
 
 function createSettingsWindow() {
@@ -967,6 +1025,40 @@ function createSettingsWindow() {
   });
 
   return settingsWindow;
+}
+
+function createAuthWindow() {
+  authWindow = new BrowserWindow({
+    width: 500,
+    height: 700,
+    resizable: false,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false
+    },
+    titleBarStyle: 'hiddenInset',
+    show: false
+  })
+
+  if (process.env.VITE_DEV_SERVER_URL) {
+    authWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}/auth/index.html`)
+  } else {
+    authWindow.loadFile(path.join(__dirname, '../renderer/auth/index.html'))
+  }
+
+  authWindow.once('ready-to-show', () => {
+    authWindow.show()
+    // Open DevTools in development to see console logs
+    if (process.env.VITE_DEV_SERVER_URL) {
+      authWindow.webContents.openDevTools()
+    }
+  })
+
+  authWindow.on('closed', () => {
+    authWindow = null
+  })
+
+  return authWindow
 }
 
 async function processAppOCR(appInfo, reason = "app_switch") {
@@ -1155,6 +1247,176 @@ function generateUUID() {
   });
 }
 
+// Auth IPC Handlers
+ipcMain.on('auth-signin', async (event, { email, password }) => {
+  try {
+    const result = await authStore.signin(email, password)
+    currentUserId = result.user.id
+    event.sender.send('auth-success', result)
+
+    // Close auth window
+    if (authWindow) {
+      authWindow.close()
+      authWindow = null
+    }
+
+    // Create main app windows
+    createSuggestionsWindow()
+    await createUserSession()
+    setupPipelines()
+  } catch (error) {
+    event.sender.send('auth-error', error.message)
+  }
+})
+
+ipcMain.on('auth-signup', async (event, { email, password, name }) => {
+  try {
+    const result = await authStore.signup(email, password, name)
+
+    if (result.requiresConfirmation) {
+      event.sender.send('auth-error', result.message)
+    } else {
+      currentUserId = result.user.id
+      event.sender.send('auth-success', result)
+
+      if (authWindow) {
+        authWindow.close()
+        authWindow = null
+      }
+
+      // Create main app windows
+      createSuggestionsWindow()
+      await createUserSession()
+      setupPipelines()
+    }
+  } catch (error) {
+    event.sender.send('auth-error', error.message)
+  }
+})
+
+ipcMain.on('auth-signout', async (event) => {
+  authStore.clearAuth()
+  currentUserId = null
+
+  // Close all windows
+  BrowserWindow.getAllWindows().forEach(window => {
+    if (window !== authWindow) {
+      window.close()
+    }
+  })
+
+  // Show auth window
+  if (!authWindow) {
+    createAuthWindow()
+  }
+})
+
+ipcMain.handle('auth-check', async () => {
+  return {
+    isAuthenticated: authStore.isAuthenticated(),
+    user: authStore.getUser()
+  }
+})
+
+ipcMain.on('auth-google', async (event) => {
+  console.log('🔵 Received auth-google IPC event')
+  try {
+    // Step 1: Get OAuth URL from backend
+    console.log('📡 Requesting OAuth URL from backend...')
+    const response = await axios.post('http://127.0.0.1:8000/api/auth/oauth/signin', {
+      provider: 'google',
+      redirect_to: 'http://127.0.0.1:8000/api/auth/callback'
+    })
+
+    console.log('✅ Got OAuth URL:', response.data.url)
+    const oauthUrl = response.data.url
+
+    // Step 2: Open OAuth window
+    console.log('🪟 Opening OAuth window...')
+    const oauthWindow = new BrowserWindow({
+      width: 600,
+      height: 700,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true
+      }
+    })
+
+    oauthWindow.loadURL(oauthUrl)
+
+    // Step 3: Listen for callback redirect
+    oauthWindow.webContents.on('will-redirect', async (event, url) => {
+      console.log('🔄 OAuth redirect URL:', url)
+
+      // Check if this is the callback URL (when Supabase redirects back to us)
+      if (url.includes('/api/auth/callback') && url.includes('code=')) {
+        event.preventDefault()
+        console.log('✅ Callback URL detected, extracting code...')
+
+        // Extract authorization code from URL
+        const urlParams = new URL(url)
+        const code = urlParams.searchParams.get('code')
+        console.log('📝 Extracted code:', code ? 'present' : 'missing')
+
+        if (code) {
+          try {
+            console.log('🔄 Exchanging code for tokens...')
+            // Step 4: Exchange code for tokens
+            const tokenResponse = await axios.post('http://127.0.0.1:8000/api/auth/oauth/callback', {
+              code: code,
+              provider: 'google'
+            })
+
+            console.log('✅ Token exchange successful')
+            const { access_token, refresh_token, user } = tokenResponse.data
+
+            // Save tokens
+            authStore.setTokens(access_token, refresh_token, user)
+            currentUserId = user.id
+
+            // Close OAuth window
+            oauthWindow.close()
+
+            // Send success to auth window
+            if (authWindow && !authWindow.isDestroyed()) {
+              authWindow.webContents.send('auth-success', { user })
+            }
+
+            // Close auth window and show main app
+            if (authWindow) {
+              authWindow.close()
+              authWindow = null
+            }
+
+            // Create main app windows
+            createSuggestionsWindow()
+            await createUserSession()
+            setupPipelines()
+
+          } catch (error) {
+            console.error('❌ OAuth callback error:', error.response?.data || error.message)
+            if (authWindow && !authWindow.isDestroyed()) {
+              authWindow.webContents.send('auth-error', error.response?.data?.detail || 'Authentication failed. Please try again.')
+            }
+            oauthWindow.close()
+          }
+        }
+      }
+    })
+
+    // Handle window close without completing auth
+    oauthWindow.on('closed', () => {
+      if (!authStore.isAuthenticated()) {
+        event.sender.send('auth-error', 'Authentication cancelled')
+      }
+    })
+
+  } catch (error) {
+    console.error('Google OAuth error:', error)
+    event.sender.send('auth-error', 'Failed to start Google sign-in. Please try again.')
+  }
+})
+
 function setupPipelines() {
   ocrManager = new OCRManager(suggestionsWindow);
   ocrBatchManager = new OCRBatchManager();
@@ -1309,8 +1571,6 @@ function setupPipelines() {
 }
 
 app.whenReady().then(async () => {
-  // createMainWindow();
-  createSuggestionsWindow();
   // Set up application menu
   const template = [
     {
@@ -1391,8 +1651,21 @@ app.whenReady().then(async () => {
     }
   });
 
-  await createUserSession();
-  setupPipelines();
+  // Check if user is authenticated
+  if (authStore.isAuthenticated()) {
+    console.log('✅ User already authenticated')
+    const user = authStore.getUser()
+    currentUserId = user.id
+
+    // Create main app windows
+    createSuggestionsWindow()
+    await createUserSession();
+    setupPipelines();
+  } else {
+    console.log('🔐 User not authenticated, showing login')
+    createAuthWindow()
+    // Don't create windows or setup pipelines until after login
+  }
 
   if (process.platform === "darwin") {
 
@@ -1799,6 +2072,16 @@ ipcMain.on('set-settings-dot-click-through', (event, enabled) => {
   }
 });
 
+ipcMain.on('set-quit-dot-click-through', (event, enabled) => {
+  if (quitDotWindow && !quitDotWindow.isDestroyed()) {
+    quitDotWindow.setIgnoreMouseEvents(enabled, { forward: true });
+  }
+});
+
+ipcMain.on('quit-app', () => {
+  app.quit();
+});
+
 // Force suggestion request handler
 ipcMain.handle("force-suggestion-request", async (event) => {
   console.log('🔍 Force suggestion request received');
@@ -2090,7 +2373,8 @@ async function expandHub() {
     { window: visionToggleWindow, offset: 1 },
     { window: llmDotWindow, offset: 2 },
     { window: forceButtonWindow, offset: 3 },
-    { window: settingsDotWindow, offset: 4 }
+    { window: settingsDotWindow, offset: 4 },
+    { window: quitDotWindow, offset: 5 }
   ];
 
   // Store collapsed positions (all at hub position)
@@ -2144,7 +2428,8 @@ async function collapseHub() {
     visionToggleWindow,
     llmDotWindow,
     forceButtonWindow,
-    settingsDotWindow
+    settingsDotWindow,
+    quitDotWindow
   ];
 
   // Animate all dots back to hub position

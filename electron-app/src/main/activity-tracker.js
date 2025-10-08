@@ -1,5 +1,7 @@
 import { globalShortcut, screen } from 'electron'
 import activeWin from 'active-win'
+import authStore from './auth-store.js'
+
 let fetch;
 try {
   fetch = globalThis.fetch;
@@ -432,15 +434,22 @@ class ComprehensiveActivityTracker {
         },
       }));
 
+      // Get auth token for API call
+      const token = authStore.getAccessToken();
+      const headers = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
       const response = await fetch(
         `${this.backendUrl}/api/activity/activity-batch`,
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: headers,
           body: JSON.stringify({
-            user_id: this.userId,
+            // user_id is no longer needed - comes from auth token
             session_id: this.sessionId,
             events: transformedEvents,
           }),
@@ -462,13 +471,20 @@ class ComprehensiveActivityTracker {
 
   async sendSessionStatsToBackend() {
     try {
+      // Get auth token for API call
+      const token = authStore.getAccessToken();
+      const headers = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
       const response = await fetch(`${this.backendUrl}/api/activity/session-stats`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: headers,
         body: JSON.stringify({
-          user_id: this.userId,
+          // user_id is no longer needed - comes from auth token
           session_id: this.sessionId,
           stats: {
             ...this.sessionStats,

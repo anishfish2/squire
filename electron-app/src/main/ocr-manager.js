@@ -1,6 +1,7 @@
 import screenshot from 'screenshot-desktop'
 import FormData from 'form-data'
 import WebSocketManager from './websocket-manager.js'
+import authStore from './auth-store.js'
 
 class OCRManager {
   constructor(overlayWindow = null) {
@@ -190,7 +191,7 @@ class OCRManager {
       form.append('app_name', appContext.appName || 'Unknown');
       form.append('window_title', appContext.windowTitle || '');
       form.append('bundle_id', appContext.bundleId || '');
-      form.append('user_id', userId);
+      // user_id is no longer needed - comes from auth token
       form.append('session_id', appContext.session_id || '');
       form.append('priority', 'normal');
       form.append('session_context', JSON.stringify({
@@ -291,12 +292,19 @@ class OCRManager {
       const urlParts = new URL(url);
       const client = urlParts.protocol === 'https:' ? https : http;
 
+      // Get auth token and add to headers
+      const token = authStore.getAccessToken();
+      const headers = options.headers || {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const requestOptions = {
         hostname: urlParts.hostname,
         port: urlParts.port || (urlParts.protocol === 'https:' ? 443 : 80),
         path: urlParts.pathname + urlParts.search,
         method: options.method || 'GET',
-        headers: options.headers || {}
+        headers: headers
       };
 
       const req = client.request(requestOptions, (res) => {

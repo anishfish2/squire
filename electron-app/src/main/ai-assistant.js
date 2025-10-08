@@ -1,3 +1,5 @@
+import authStore from './auth-store.js'
+
 class AIAssistant {
   constructor() {
     this.backendUrl = 'http://127.0.0.1:8000';
@@ -583,12 +585,19 @@ class AIAssistant {
       const urlParts = new URL(url);
       const client = urlParts.protocol === 'https:' ? https : http;
 
+      // Get auth token and add to headers
+      const token = authStore.getAccessToken();
+      const headers = options.headers || {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const requestOptions = {
         hostname: urlParts.hostname,
         port: urlParts.port || (urlParts.protocol === 'https:' ? 443 : 80),
         path: urlParts.pathname + urlParts.search,
         method: options.method || 'GET',
-        headers: options.headers || {}
+        headers: headers
       };
 
       this.log('🔧 Request options:', JSON.stringify({

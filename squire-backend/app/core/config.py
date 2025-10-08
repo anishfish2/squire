@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     # Google settings
     GOOGLE_API_KEY: str
 
+    # JWT/Auth settings
+    SUPABASE_JWT_SECRET: str = ""  # Get from Supabase dashboard Settings > API > JWT Secret
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+
     # Security settings
     ALLOWED_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000"]
     ALLOWED_HOSTS: List[str] = ["localhost", "127.0.0.1"]

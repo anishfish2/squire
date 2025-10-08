@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from app.routers import ai, activity, websocket, vision, llm
+from app.routers import ai, activity, websocket, vision, llm, auth
 from app.services.websocket_manager import ws_manager
 from app.core.config import settings
 from app.core.database import supabase
@@ -57,6 +57,7 @@ if settings.ALLOWED_HOSTS:
         allowed_hosts=settings.ALLOWED_HOSTS
     )
 
+app.include_router(auth.router)
 app.include_router(ai.router, prefix="/api/ai", tags=["ai"])
 app.include_router(activity.router, prefix="/api/activity", tags=["activity"])
 app.include_router(websocket.router, prefix="/api/ws", tags=["websockets"])

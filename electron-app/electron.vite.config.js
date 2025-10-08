@@ -39,6 +39,7 @@ export default defineConfig({
     build: {
       rollupOptions: {
         input: {
+          auth: resolve(__dirname, 'src/renderer/auth/index.html'),
           debug: resolve(__dirname, 'src/renderer/debug/index.html'),
           settings: resolve(__dirname, 'src/renderer/settings/index.html'),
           'suggestions-box': resolve(__dirname, 'src/renderer/suggestions-box/index.html'),
@@ -48,6 +49,7 @@ export default defineConfig({
           'vision-toggle': resolve(__dirname, 'src/renderer/vision-toggle/index.html'),
           'hub-dot': resolve(__dirname, 'src/renderer/hub-dot/index.html'),
           'settings-dot': resolve(__dirname, 'src/renderer/settings-dot/index.html'),
+          'quit-dot': resolve(__dirname, 'src/renderer/quit-dot/index.html'),
           'screenshot-overlay': resolve(__dirname, 'src/renderer/screenshot-overlay/index.html')
         }
       }
