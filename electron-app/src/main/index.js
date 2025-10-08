@@ -1711,6 +1711,13 @@ ipcMain.on("move-llm-chat-window", (event, x, y) => {
   }
 });
 
+// Resize LLM chat window handler
+ipcMain.on("resize-llm-chat-window", (event, width, height) => {
+  if (llmChatWindow && !llmChatWindow.isDestroyed()) {
+    llmChatWindow.setSize(Math.round(width), Math.round(height), true);
+  }
+});
+
 // Click-through handlers for all dot windows
 ipcMain.on('set-dot-click-through', (event, enabled) => {
   if (dotWindow && !dotWindow.isDestroyed()) {

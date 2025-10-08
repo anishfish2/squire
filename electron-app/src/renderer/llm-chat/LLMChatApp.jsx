@@ -90,6 +90,9 @@ function LLMChatApp() {
   // Suggestion notification state
   const [suggestionNotification, setSuggestionNotification] = useState(null)
 
+  // Collapsed state
+  const [isCollapsed, setIsCollapsed] = useState(false)
+
   // Drag state
   const dragStateRef = useRef({
     isDragging: false,
@@ -422,6 +425,20 @@ function LLMChatApp() {
     }
   }, [handleMouseMove, handleMouseUp])
 
+  // Toggle collapse
+  const toggleCollapse = () => {
+    const newCollapsedState = !isCollapsed
+    setIsCollapsed(newCollapsedState)
+
+    if (newCollapsedState) {
+      // Collapse to small bar (60px wide)
+      ipcRenderer.send('resize-llm-chat-window', 60, 800)
+    } else {
+      // Expand back to normal size (400px wide)
+      ipcRenderer.send('resize-llm-chat-window', 400, 800)
+    }
+  }
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -435,11 +452,169 @@ function LLMChatApp() {
         e.preventDefault()
         forceSuggestions()
       }
+      // Cmd+Shift+M - Toggle collapse/minimize to bar
+      else if (e.metaKey && e.shiftKey && e.key === 'M') {
+        e.preventDefault()
+        toggleCollapse()
+      }
+      // Cmd+W or Escape - Close window
+      else if ((e.metaKey && e.key === 'w') || e.key === 'Escape') {
+        e.preventDefault()
+        ipcRenderer.send('toggle-hub-expansion', false)
+        setTimeout(() => {
+          ipcRenderer.send('toggle-llm-chat', false)
+        }, 100)
+      }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [visionEnabled])
+  }, [visionEnabled, isCollapsed])
+
+  // Collapsed view - minimal bar
+  if (isCollapsed) {
+    return (
+      <div
+        className="w-full h-full flex flex-col items-center justify-center"
+        style={{
+          WebkitAppRegion: 'no-drag',
+          background: 'rgba(15, 23, 42, 0.85)',
+          backdropFilter: 'blur(10px)',
+          borderRadius: '16px',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.28), 0 1px 0 rgba(255,255,255,0.06) inset',
+          opacity: isVisible ? 1 : 0,
+          transition: 'all 150ms ease-out',
+          overflow: 'hidden'
+        }}
+      >
+        {/* Expand button */}
+        <button
+          onClick={toggleCollapse}
+          style={{
+            width: '40px',
+            height: '40px',
+            borderRadius: '12px',
+            background: 'rgba(59, 130, 246, 0.2)',
+            border: '1px solid rgba(59, 130, 246, 0.3)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            transition: 'all 130ms ease-out',
+            marginBottom: '12px'
+          }}
+          className="hover:bg-blue-500/30"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="15 18 9 12 15 6"></polyline>
+          </svg>
+        </button>
+
+        {/* Tab indicators */}
+        <div className="flex flex-col gap-2">
+          <button
+            onClick={() => {
+              setActiveTab('chat')
+              toggleCollapse()
+            }}
+            style={{
+              width: '40px',
+              height: '40px',
+              borderRadius: '12px',
+              background: activeTab === 'chat' ? 'rgba(59, 130, 246, 0.3)' : 'rgba(71, 85, 105, 0.2)',
+              border: '1px solid rgba(71, 85, 105, 0.3)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              transition: 'all 130ms ease-out'
+            }}
+            className="hover:bg-white/10"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" opacity="0.8">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+            </svg>
+          </button>
+
+          <button
+            onClick={() => {
+              setActiveTab('suggestions')
+              toggleCollapse()
+            }}
+            style={{
+              width: '40px',
+              height: '40px',
+              borderRadius: '12px',
+              background: activeTab === 'suggestions' ? 'rgba(59, 130, 246, 0.3)' : 'rgba(71, 85, 105, 0.2)',
+              border: '1px solid rgba(71, 85, 105, 0.3)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              transition: 'all 130ms ease-out',
+              position: 'relative'
+            }}
+            className="hover:bg-white/10"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" opacity="0.8">
+              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path>
+            </svg>
+            {unreadCount > 0 && (
+              <span
+                style={{
+                  position: 'absolute',
+                  top: '-4px',
+                  right: '-4px',
+                  width: '16px',
+                  height: '16px',
+                  borderRadius: '50%',
+                  background: '#ef4444',
+                  border: '2px solid rgba(15, 23, 42, 0.85)',
+                  fontSize: '9px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'white',
+                  fontWeight: '600'
+                }}
+              >
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* Close button */}
+        <button
+          onClick={() => {
+            ipcRenderer.send('toggle-hub-expansion', false)
+            setTimeout(() => {
+              ipcRenderer.send('toggle-llm-chat', false)
+            }, 100)
+          }}
+          style={{
+            width: '40px',
+            height: '40px',
+            borderRadius: '12px',
+            background: 'rgba(71, 85, 105, 0.2)',
+            border: '1px solid rgba(71, 85, 105, 0.3)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            transition: 'all 130ms ease-out',
+            marginTop: 'auto'
+          }}
+          className="hover:bg-white/10"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" opacity="0.6">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div
@@ -760,12 +935,12 @@ function LLMChatApp() {
           pointerEvents: 'auto'
         }}>
           {suggestions.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-white/20 text-sm gap-3 px-4">
-              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.3">
+            <div className="flex flex-col items-center justify-center h-full text-white/40 text-sm gap-2">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.4">
                 <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path>
               </svg>
-              <span>No suggestions yet</span>
-              <div className="text-xs text-white/15 mt-1">Suggestions will appear here automatically</div>
+              <span className="font-medium">No suggestions yet</span>
+              <span className="text-xs text-white/30">Suggestions will appear here automatically</span>
             </div>
           ) : (
             <div className="p-4 space-y-3" style={{ WebkitAppRegion: 'no-drag', pointerEvents: 'auto' }}>

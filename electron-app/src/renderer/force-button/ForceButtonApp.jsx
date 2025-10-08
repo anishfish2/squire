@@ -4,6 +4,51 @@ import '@/styles.css'
 
 const { ipcRenderer } = window.require('electron')
 
+// Tooltip component
+const Tooltip = ({ text, hotkey, show }) => (
+  show && (
+    <div style={{
+      position: 'absolute',
+      bottom: '-38px',
+      left: '50%',
+      transform: 'translateX(-50%)',
+      padding: '6px 12px',
+      background: 'rgba(0, 0, 0, 0.95)',
+      color: 'white',
+      fontSize: '11px',
+      fontWeight: '500',
+      borderRadius: '8px',
+      whiteSpace: 'nowrap',
+      pointerEvents: 'none',
+      zIndex: 10000,
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: '3px'
+    }}>
+      <span>{text}</span>
+      {hotkey && (
+        <span style={{
+          fontSize: '9px',
+          opacity: 0.6,
+          fontFamily: 'monospace'
+        }}>{hotkey}</span>
+      )}
+      <div style={{
+        position: 'absolute',
+        top: '-4px',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        width: 0,
+        height: 0,
+        borderLeft: '5px solid transparent',
+        borderRight: '5px solid transparent',
+        borderBottom: '5px solid rgba(0, 0, 0, 0.95)'
+      }} />
+    </div>
+  )
+)
+
 function ForceButtonApp() {
   const [isHovered, setIsHovered] = useState(false)
 
@@ -67,39 +112,41 @@ function ForceButtonApp() {
         background: 'transparent'
       }}
     >
-      <button
-        style={{
-          width: '40px',
-          height: '40px',
-          borderRadius: '50%',
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          border: '2px solid rgba(255, 255, 255, 0.3)',
-          background: 'rgba(71, 85, 105, 0.9)',
-          boxShadow: isHovered
-            ? '0 8px 24px rgba(71, 85, 105, 0.3)'
-            : '0 4px 12px rgba(0, 0, 0, 0.15)',
-          transform: isHovered ? 'scale(1.1)' : 'scale(1)',
-          transition: 'all 0.2s ease',
-          WebkitAppRegion: 'no-drag',
-        }}
-        title="Get Suggestions Now"
-        onClick={handleForceSuggestion}
-        onMouseEnter={() => {
-          setIsHovered(true)
-          ipcRenderer.send('set-force-button-click-through', false)
-        }}
-        onMouseLeave={() => {
-          setIsHovered(false)
-          ipcRenderer.send('set-force-button-click-through', true)
-        }}
-      >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.9 }}>
-          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path>
-        </svg>
-      </button>
+      <div style={{ position: 'relative' }}>
+        <button
+          style={{
+            width: '40px',
+            height: '40px',
+            borderRadius: '50%',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            border: '2px solid rgba(255, 255, 255, 0.3)',
+            background: 'rgba(71, 85, 105, 0.9)',
+            boxShadow: isHovered
+              ? '0 8px 24px rgba(71, 85, 105, 0.3)'
+              : '0 4px 12px rgba(0, 0, 0, 0.15)',
+            transform: isHovered ? 'scale(1.1)' : 'scale(1)',
+            transition: 'all 0.2s ease',
+            WebkitAppRegion: 'no-drag',
+          }}
+          onClick={handleForceSuggestion}
+          onMouseEnter={() => {
+            setIsHovered(true)
+            ipcRenderer.send('set-force-button-click-through', false)
+          }}
+          onMouseLeave={() => {
+            setIsHovered(false)
+            ipcRenderer.send('set-force-button-click-through', true)
+          }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.9 }}>
+            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path>
+          </svg>
+        </button>
+        <Tooltip text="Suggest" hotkey="⌘⇧F" show={isHovered} />
+      </div>
     </div>
   )
 }

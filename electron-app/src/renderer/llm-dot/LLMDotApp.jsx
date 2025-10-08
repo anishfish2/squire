@@ -4,6 +4,51 @@ import '@/styles.css'
 
 const { ipcRenderer } = window.require('electron')
 
+// Tooltip component
+const Tooltip = ({ text, hotkey, show }) => (
+  show && (
+    <div style={{
+      position: 'absolute',
+      bottom: '-38px',
+      left: '50%',
+      transform: 'translateX(-50%)',
+      padding: '6px 12px',
+      background: 'rgba(0, 0, 0, 0.95)',
+      color: 'white',
+      fontSize: '11px',
+      fontWeight: '500',
+      borderRadius: '8px',
+      whiteSpace: 'nowrap',
+      pointerEvents: 'none',
+      zIndex: 10000,
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: '3px'
+    }}>
+      <span>{text}</span>
+      {hotkey && (
+        <span style={{
+          fontSize: '9px',
+          opacity: 0.6,
+          fontFamily: 'monospace'
+        }}>{hotkey}</span>
+      )}
+      <div style={{
+        position: 'absolute',
+        top: '-4px',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        width: 0,
+        height: 0,
+        borderLeft: '5px solid transparent',
+        borderRight: '5px solid transparent',
+        borderBottom: '5px solid rgba(0, 0, 0, 0.95)'
+      }} />
+    </div>
+  )
+)
+
 function LLMDotApp() {
   const [isHovered, setIsHovered] = useState(false)
   const dotRef = useRef(null)
@@ -42,28 +87,31 @@ function LLMDotApp() {
         background: 'transparent'
       }}
     >
-      <div
-        ref={dotRef}
-        style={dotStyle}
-        onClick={(e) => {
-          e.stopPropagation()
-          ipcRenderer.send('toggle-llm-chat', true)
-        }}
-        onMouseEnter={() => {
-          setIsHovered(true)
-          ipcRenderer.send('set-llm-dot-click-through', false)
-        }}
-        onMouseLeave={() => {
-          setIsHovered(false)
-          ipcRenderer.send('set-llm-dot-click-through', true)
-        }}
-      >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.9 }}>
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-          <path d="M8 10h.01"></path>
-          <path d="M12 10h.01"></path>
-          <path d="M16 10h.01"></path>
-        </svg>
+      <div style={{ position: 'relative' }}>
+        <div
+          ref={dotRef}
+          style={dotStyle}
+          onClick={(e) => {
+            e.stopPropagation()
+            ipcRenderer.send('toggle-llm-chat', true)
+          }}
+          onMouseEnter={() => {
+            setIsHovered(true)
+            ipcRenderer.send('set-llm-dot-click-through', false)
+          }}
+          onMouseLeave={() => {
+            setIsHovered(false)
+            ipcRenderer.send('set-llm-dot-click-through', true)
+          }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.9 }}>
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+            <path d="M8 10h.01"></path>
+            <path d="M12 10h.01"></path>
+            <path d="M16 10h.01"></path>
+          </svg>
+        </div>
+        <Tooltip text="Chat" hotkey="⌘⇧L" show={isHovered} />
       </div>
     </div>
   )
