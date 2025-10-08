@@ -50,7 +50,7 @@ const Tooltip = ({ text, hotkey, show }) => (
 )
 
 function VisionToggleApp() {
-  const [isEnabled, setIsEnabled] = useState(true) // Default to enabled
+  const [isEnabled, setIsEnabled] = useState(false) // Default to disabled
   const [isHovered, setIsHovered] = useState(false)
 
   // Sync state with backend on mount and enable click-through

@@ -23,12 +23,20 @@ function SettingsApp() {
     }
 
     const handleAppPreferencesLoaded = (event, preferences) => {
-      setAppPreferences(preferences.sort((a, b) => a.app_name.localeCompare(b.app_name)))
-      setPreferencesLoaded(true)
+      console.log('[Settings] Loaded preferences from backend:', preferences)
+      console.log('[Settings] Number of apps:', preferences?.length || 0)
 
-      // Mark all apps from database as detected
-      const apps = new Set(preferences.map(p => p.app_name))
-      setDetectedApps(apps)
+      if (preferences && preferences.length > 0) {
+        setAppPreferences(preferences.sort((a, b) => a.app_name.localeCompare(b.app_name)))
+        setPreferencesLoaded(true)
+
+        // Mark all apps from database as detected
+        const apps = new Set(preferences.map(p => p.app_name))
+        setDetectedApps(apps)
+      } else {
+        console.log('[Settings] No preferences received from backend')
+        setPreferencesLoaded(true)
+      }
 
       // Request detected apps
       ipcRenderer.send('get-detected-apps')
@@ -82,10 +90,17 @@ function SettingsApp() {
     }
   }, [preferencesLoaded])
 
-  // Load user data
+  // Load user data and global vision state
   useEffect(() => {
     ipcRenderer.invoke('auth-check').then(({ user }) => {
       setUser(user)
+    })
+
+    // Load current global vision state
+    ipcRenderer.invoke('get-vision-state').then(state => {
+      setGlobalVisionEnabled(state)
+    }).catch(err => {
+      console.error('[Settings] Failed to get vision state:', err)
     })
   }, [])
 
@@ -166,7 +181,7 @@ function SettingsApp() {
   return (
     <div className="w-full h-screen flex flex-col bg-[#1a1a1a] text-white">
       {/* Header */}
-      <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 [-webkit-app-region:drag]">
+      <div className="flex items-center justify-between px-8 py-4 border-b border-white/10 [-webkit-app-region:drag]">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 bg-white/5 rounded-lg flex items-center justify-center border border-white/10">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white/80">
@@ -188,7 +203,7 @@ function SettingsApp() {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 overflow-y-auto px-12 py-5 custom-scrollbar">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden px-8 py-6 custom-scrollbar">
         {/* User Profile Section */}
         {user && (
           <div className="mb-5 bg-white/5 rounded-xl p-5 border border-white/10">
@@ -271,7 +286,7 @@ function SettingsApp() {
         </div>
 
         {/* App List */}
-        <div className="space-y-4">
+        <div className="space-y-4 w-full">
           {filteredPreferences.length === 0 && appPreferences.length === 0 ? (
             <div className="text-center py-12 text-white/30">
               <div className="text-4xl mb-3">📱</div>
@@ -296,7 +311,7 @@ function SettingsApp() {
       </div>
 
       {/* Footer Stats */}
-      <div className="px-12 py-3 border-t border-white/10 flex items-center justify-between text-xs">
+      <div className="px-8 py-4 border-t border-white/10 flex items-center justify-between text-xs">
         <div className="flex gap-3 text-white/40">
           <span>Total: <span className="text-white/70 font-medium">{stats.total}</span></span>
           <span>OCR: <span className="text-white/70 font-medium">{stats.ocrEnabled}</span></span>
@@ -312,73 +327,73 @@ function SettingsApp() {
 
 function AppCard({ preference, isActive, onToggle }) {
   return (
-    <div className="app-card bg-white/5 hover:bg-white/[0.08] rounded-xl p-4 border border-white/10 transition-all">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 bg-white/5 rounded-lg flex items-center justify-center text-sm border border-white/10">
-            📱
-          </div>
-          <div>
-            <h3 className="text-white font-medium text-sm m-0">{preference.app_name}</h3>
-            {isActive ? (
-              <span className="text-green-400/70 text-xs">● Active</span>
-            ) : (
-              <span className="text-white/20 text-xs">○ Inactive</span>
-            )}
-          </div>
+    <div className="app-card bg-white/5 hover:bg-white/[0.08] rounded-xl p-6 border border-white/10 transition-all">
+      {/* Header */}
+      <div className="flex items-center gap-3 mb-5 pb-4 border-b border-white/10">
+        <div className="w-10 h-10 bg-white/5 rounded-lg flex items-center justify-center text-lg border border-white/10 flex-shrink-0">
+          📱
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="text-white font-semibold text-base m-0 truncate">{preference.app_name}</h3>
+          {isActive ? (
+            <span className="text-green-400 text-xs font-medium">● Active</span>
+          ) : (
+            <span className="text-white/40 text-xs">○ Inactive</span>
+          )}
         </div>
       </div>
 
+      {/* Toggles - Vertical Stack */}
       <div className="space-y-3">
         {/* OCR Toggle */}
-        <div className="flex items-center justify-between">
-          <span className="text-white/60 text-xs">OCR</span>
-          <label className="relative inline-block w-9 h-5 cursor-pointer">
+        <div className="flex items-center justify-between py-3.5 px-5 bg-[rgba(71,85,105,0.3)] hover:bg-[rgba(71,85,105,0.4)] rounded-lg transition-all">
+          <span className="text-white font-medium text-sm">OCR</span>
+          <label className="relative inline-block w-11 h-6 cursor-pointer flex-shrink-0 [-webkit-app-region:no-drag]">
             <input
               type="checkbox"
               checked={preference.allow_ocr}
               onChange={(e) => onToggle(preference.app_name, 'allow_ocr', e.target.checked)}
               className="sr-only peer"
             />
-            <div className="w-full h-full bg-white/10 peer-checked:bg-blue-500/50 rounded-full transition-all border border-white/20"></div>
-            <div className="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></div>
+            <div className="w-full h-full bg-[rgba(51,65,85,0.9)] peer-checked:bg-[rgba(100,116,139,0.9)] rounded-full transition-all border-2 border-white/30"></div>
+            <div className="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5 shadow-lg"></div>
           </label>
         </div>
 
         {/* Vision Toggle */}
-        <div className="flex items-center justify-between">
-          <span className="text-white/60 text-xs">Vision</span>
-          <label className="relative inline-block w-9 h-5 cursor-pointer">
+        <div className="flex items-center justify-between py-3.5 px-5 bg-[rgba(71,85,105,0.3)] hover:bg-[rgba(71,85,105,0.4)] rounded-lg transition-all">
+          <span className="text-white font-medium text-sm">Vision</span>
+          <label className="relative inline-block w-11 h-6 cursor-pointer flex-shrink-0 [-webkit-app-region:no-drag]">
             <input
               type="checkbox"
               checked={preference.allow_vision}
               onChange={(e) => onToggle(preference.app_name, 'allow_vision', e.target.checked)}
               className="sr-only peer"
             />
-            <div className="w-full h-full bg-white/10 peer-checked:bg-blue-500/50 rounded-full transition-all border border-white/20"></div>
-            <div className="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></div>
+            <div className="w-full h-full bg-[rgba(51,65,85,0.9)] peer-checked:bg-[rgba(100,116,139,0.9)] rounded-full transition-all border-2 border-white/30"></div>
+            <div className="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5 shadow-lg"></div>
           </label>
         </div>
 
-        {/* Screenshot Storage Toggle */}
-        <div className="flex items-center justify-between">
-          <span className="text-white/60 text-xs">Screenshots</span>
-          <label className="relative inline-block w-9 h-5 cursor-pointer">
+        {/* Screenshots Toggle */}
+        <div className="flex items-center justify-between py-3.5 px-5 bg-[rgba(71,85,105,0.3)] hover:bg-[rgba(71,85,105,0.4)] rounded-lg transition-all">
+          <span className="text-white font-medium text-sm">Screenshots</span>
+          <label className="relative inline-block w-11 h-6 cursor-pointer flex-shrink-0 [-webkit-app-region:no-drag]">
             <input
               type="checkbox"
               checked={preference.allow_screenshots}
               onChange={(e) => onToggle(preference.app_name, 'allow_screenshots', e.target.checked)}
               className="sr-only peer"
             />
-            <div className="w-full h-full bg-white/10 peer-checked:bg-blue-500/50 rounded-full transition-all border border-white/20"></div>
-            <div className="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></div>
+            <div className="w-full h-full bg-[rgba(51,65,85,0.9)] peer-checked:bg-[rgba(100,116,139,0.9)] rounded-full transition-all border-2 border-white/30"></div>
+            <div className="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5 shadow-lg"></div>
           </label>
         </div>
       </div>
 
       {preference.allow_vision && (
-        <div className="mt-2 pt-2 border-t border-white/10 text-xs text-white/30">
-          Vision costs: ~$0.01-0.03/image
+        <div className="mt-4 pt-4 border-t border-white/10 text-xs text-white/40 text-center">
+          💰 Vision costs: ~$0.01-0.03/image
         </div>
       )}
     </div>

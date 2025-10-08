@@ -2016,6 +2016,9 @@ ipcMain.on("move-hub-dot-window", (event, x, y) => {
       if (settingsDotWindow && !settingsDotWindow.isDestroyed()) {
         settingsDotWindow.setPosition(Math.round(x), Math.round(y) - spacing * 4);
       }
+      if (quitDotWindow && !quitDotWindow.isDestroyed()) {
+        quitDotWindow.setPosition(Math.round(x), Math.round(y) - spacing * 5);
+      }
     } else {
       // Keep all dots at hub position when collapsed (hidden)
       const collapsedY = Math.round(y);
@@ -2031,6 +2034,9 @@ ipcMain.on("move-hub-dot-window", (event, x, y) => {
       }
       if (settingsDotWindow && !settingsDotWindow.isDestroyed()) {
         settingsDotWindow.setPosition(Math.round(x), collapsedY);
+      }
+      if (quitDotWindow && !quitDotWindow.isDestroyed()) {
+        quitDotWindow.setPosition(Math.round(x), collapsedY);
       }
     }
   }
@@ -2144,16 +2150,26 @@ ipcMain.on("get-detected-apps", (event) => {
 
 ipcMain.on("load-app-preferences", async (event) => {
   try {
+    console.log(`📋 [Main] Loading app preferences for user: ${currentUserId}`);
+
+    // Get auth token for API call
+    const token = authStore.getAccessToken();
+    const headers = {
+      "Content-Type": "application/json",
+    };
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
 
     const response = await fetch(`http://127.0.0.1:8000/api/vision/preferences/${currentUserId}`, {
       method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: headers,
     });
 
     if (response.ok) {
       const prefs = await response.json();
+      console.log(`✅ [Main] Loaded ${prefs?.length || 0} app preferences from backend`);
+      console.log(`📋 [Main] Apps:`, prefs?.map(p => p.app_name).join(', '));
       event.reply("app-preferences-loaded", prefs);
     } else {
       console.error(`❌ [Main] Failed to load app preferences: ${response.status}`);
@@ -2167,12 +2183,18 @@ ipcMain.on("load-app-preferences", async (event) => {
 
 ipcMain.on("update-app-preference", async (event, { appName, updates }) => {
   try {
+    // Get auth token for API call
+    const token = authStore.getAccessToken();
+    const headers = {
+      "Content-Type": "application/json",
+    };
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
 
     const response = await fetch(`http://127.0.0.1:8000/api/vision/preferences/${currentUserId}/${appName}`, {
       method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: headers,
       body: JSON.stringify(updates),
     });
 

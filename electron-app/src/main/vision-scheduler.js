@@ -1,8 +1,10 @@
 // vision-scheduler.js
-import { desktopCapturer, screen } from 'electron'
+import { desktopCapturer, screen, app } from 'electron'
 import FormData from 'form-data'
 import axios from 'axios'
 import authStore from './auth-store.js'
+import fs from 'fs'
+import path from 'path'
 
 class VisionScheduler {
   constructor(backendUrl, userId, sessionId) {
@@ -13,7 +15,10 @@ class VisionScheduler {
     this.isCapturing = false;
     this.currentApp = null;
     this.appPreferences = new Map();
-    this.globalVisionEnabled = false;
+    this.statePath = path.join(app.getPath('userData'), 'vision-state.json');
+
+    // Load saved state or default to true (vision enabled by default)
+    this.globalVisionEnabled = this.loadVisionState();
 
     // Default intervals (in milliseconds)
     this.intervals = {
@@ -22,6 +27,37 @@ class VisionScheduler {
       'high': 30000      // 30 seconds
     };
 
+  }
+
+  /**
+   * Load vision state from disk
+   */
+  loadVisionState() {
+    try {
+      if (fs.existsSync(this.statePath)) {
+        const data = fs.readFileSync(this.statePath, 'utf8');
+        const state = JSON.parse(data);
+        console.log(`📸 [VisionScheduler] Loaded vision state from disk: ${state.enabled}`);
+        return state.enabled !== undefined ? state.enabled : false;
+      }
+    } catch (error) {
+      console.error('📸 [VisionScheduler] Failed to load vision state:', error);
+    }
+    // Default to false (vision disabled)
+    console.log('📸 [VisionScheduler] No saved state, defaulting to disabled');
+    return false;
+  }
+
+  /**
+   * Save vision state to disk
+   */
+  saveVisionState() {
+    try {
+      fs.writeFileSync(this.statePath, JSON.stringify({ enabled: this.globalVisionEnabled }, null, 2));
+      console.log(`📸 [VisionScheduler] Saved vision state: ${this.globalVisionEnabled}`);
+    } catch (error) {
+      console.error('📸 [VisionScheduler] Failed to save vision state:', error);
+    }
   }
 
   /**
@@ -72,6 +108,9 @@ class VisionScheduler {
     console.log(`📸 [VisionScheduler] setGlobalVisionEnabled called: ${enabled}`);
     this.globalVisionEnabled = enabled;
     console.log(`📸 [VisionScheduler] globalVisionEnabled is now: ${this.globalVisionEnabled}`);
+
+    // Save state to disk
+    this.saveVisionState();
 
     if (!enabled && this.captureInterval) {
       console.log('📸 [VisionScheduler] Stopping scheduling because vision is disabled');
