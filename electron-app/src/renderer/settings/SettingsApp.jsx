@@ -181,7 +181,7 @@ function SettingsApp() {
   return (
     <div className="w-full h-screen flex flex-col bg-[#1a1a1a] text-white">
       {/* Header */}
-      <div className="flex items-center justify-between px-8 py-4 border-b border-white/10 [-webkit-app-region:drag]">
+      <div className="flex items-center justify-between px-12 py-4 border-b border-white/10 [-webkit-app-region:drag]">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 bg-white/5 rounded-lg flex items-center justify-center border border-white/10">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white/80">
@@ -203,7 +203,7 @@ function SettingsApp() {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden px-8 py-6 custom-scrollbar">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden px-12 py-6 custom-scrollbar max-w-4xl mx-auto w-full">
         {/* User Profile Section */}
         {user && (
           <div className="mb-5 bg-white/5 rounded-xl p-5 border border-white/10">
@@ -311,7 +311,7 @@ function SettingsApp() {
       </div>
 
       {/* Footer Stats */}
-      <div className="px-8 py-4 border-t border-white/10 flex items-center justify-between text-xs">
+      <div className="px-12 py-4 border-t border-white/10 flex items-center justify-between text-xs max-w-4xl mx-auto w-full">
         <div className="flex gap-3 text-white/40">
           <span>Total: <span className="text-white/70 font-medium">{stats.total}</span></span>
           <span>OCR: <span className="text-white/70 font-medium">{stats.ocrEnabled}</span></span>
@@ -344,48 +344,48 @@ function AppCard({ preference, isActive, onToggle }) {
       </div>
 
       {/* Toggles - Vertical Stack */}
-      <div className="space-y-3">
+      <div className="space-y-3 px-4">
         {/* OCR Toggle */}
-        <div className="flex items-center justify-between py-3.5 px-5 bg-[rgba(71,85,105,0.3)] hover:bg-[rgba(71,85,105,0.4)] rounded-lg transition-all">
+        <div className="flex items-center justify-between py-4 px-6 bg-slate-600/30 hover:bg-slate-600/40 rounded-lg transition-all">
           <span className="text-white font-medium text-sm">OCR</span>
-          <label className="relative inline-block w-11 h-6 cursor-pointer flex-shrink-0 [-webkit-app-region:no-drag]">
+          <label className="relative inline-block w-11 h-6 cursor-pointer flex-shrink-0 [-webkit-app-region:no-drag] ml-8">
             <input
               type="checkbox"
               checked={preference.allow_ocr}
               onChange={(e) => onToggle(preference.app_name, 'allow_ocr', e.target.checked)}
               className="sr-only peer"
             />
-            <div className="w-full h-full bg-[rgba(51,65,85,0.9)] peer-checked:bg-[rgba(100,116,139,0.9)] rounded-full transition-all border-2 border-white/30"></div>
+            <div className="w-full h-full bg-slate-700 peer-checked:bg-slate-500 rounded-full transition-all border-2 border-white/30"></div>
             <div className="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5 shadow-lg"></div>
           </label>
         </div>
 
         {/* Vision Toggle */}
-        <div className="flex items-center justify-between py-3.5 px-5 bg-[rgba(71,85,105,0.3)] hover:bg-[rgba(71,85,105,0.4)] rounded-lg transition-all">
+        <div className="flex items-center justify-between py-4 px-6 bg-slate-600/30 hover:bg-slate-600/40 rounded-lg transition-all">
           <span className="text-white font-medium text-sm">Vision</span>
-          <label className="relative inline-block w-11 h-6 cursor-pointer flex-shrink-0 [-webkit-app-region:no-drag]">
+          <label className="relative inline-block w-11 h-6 cursor-pointer flex-shrink-0 [-webkit-app-region:no-drag] ml-8">
             <input
               type="checkbox"
               checked={preference.allow_vision}
               onChange={(e) => onToggle(preference.app_name, 'allow_vision', e.target.checked)}
               className="sr-only peer"
             />
-            <div className="w-full h-full bg-[rgba(51,65,85,0.9)] peer-checked:bg-[rgba(100,116,139,0.9)] rounded-full transition-all border-2 border-white/30"></div>
+            <div className="w-full h-full bg-slate-700 peer-checked:bg-slate-500 rounded-full transition-all border-2 border-white/30"></div>
             <div className="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5 shadow-lg"></div>
           </label>
         </div>
 
         {/* Screenshots Toggle */}
-        <div className="flex items-center justify-between py-3.5 px-5 bg-[rgba(71,85,105,0.3)] hover:bg-[rgba(71,85,105,0.4)] rounded-lg transition-all">
+        <div className="flex items-center justify-between py-4 px-6 bg-slate-600/30 hover:bg-slate-600/40 rounded-lg transition-all">
           <span className="text-white font-medium text-sm">Screenshots</span>
-          <label className="relative inline-block w-11 h-6 cursor-pointer flex-shrink-0 [-webkit-app-region:no-drag]">
+          <label className="relative inline-block w-11 h-6 cursor-pointer flex-shrink-0 [-webkit-app-region:no-drag] ml-8">
             <input
               type="checkbox"
               checked={preference.allow_screenshots}
               onChange={(e) => onToggle(preference.app_name, 'allow_screenshots', e.target.checked)}
               className="sr-only peer"
             />
-            <div className="w-full h-full bg-[rgba(51,65,85,0.9)] peer-checked:bg-[rgba(100,116,139,0.9)] rounded-full transition-all border-2 border-white/30"></div>
+            <div className="w-full h-full bg-slate-700 peer-checked:bg-slate-500 rounded-full transition-all border-2 border-white/30"></div>
             <div className="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5 shadow-lg"></div>
           </label>
         </div>

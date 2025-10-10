@@ -20,12 +20,33 @@ class VisionScheduler {
     // Load saved state or default to true (vision enabled by default)
     this.globalVisionEnabled = this.loadVisionState();
 
+    // TEMPORARY: Force enable vision for testing
+    if (!this.globalVisionEnabled) {
+      console.log('📸 [VisionScheduler] Forcing vision enabled for testing');
+      this.setGlobalVisionEnabled(true);
+    }
+
     // Default intervals (in milliseconds)
     this.intervals = {
-      'low': 60000,      // 1 minute
-      'normal': 10000,   // 10 seconds (for testing)
-      'high': 30000      // 30 seconds
+      'low': 60000,      // 1 minute - for passive apps
+      'normal': 15000,   // 15 seconds - standard apps
+      'high': 5000       // 5 seconds - for actionable apps (Gmail, Calendar, etc.)
     };
+
+    // Actionable apps that need high-frequency vision
+    this.actionableApps = [
+      'gmail',
+      'mail',
+      'outlook',
+      'calendar',
+      'google chrome', // For Gmail web
+      'safari',
+      'firefox',
+      'microsoft edge',
+      'slack',
+      'discord',
+      'notion'
+    ];
 
   }
 
@@ -43,9 +64,9 @@ class VisionScheduler {
     } catch (error) {
       console.error('📸 [VisionScheduler] Failed to load vision state:', error);
     }
-    // Default to false (vision disabled)
-    console.log('📸 [VisionScheduler] No saved state, defaulting to disabled');
-    return false;
+    // Default to true (vision enabled) for testing
+    console.log('📸 [VisionScheduler] No saved state, defaulting to ENABLED');
+    return true;
   }
 
   /**
@@ -234,6 +255,17 @@ class VisionScheduler {
       return this.intervals.normal;
     }
 
+    // Check if this is an actionable app - auto-set to high frequency
+    const isActionableApp = this.actionableApps.some(app =>
+      this.currentApp.toLowerCase().includes(app)
+    );
+
+    if (isActionableApp) {
+      console.log(`📸 [VisionScheduler] Actionable app detected: ${this.currentApp} - using HIGH frequency (${this.intervals.high}ms)`);
+      return this.intervals.high; // 5 seconds for actionable apps
+    }
+
+    // Otherwise use preferences from backend
     const pref = this.appPreferences.get(this.currentApp);
 
     if (!pref || !pref.vision_frequency) {

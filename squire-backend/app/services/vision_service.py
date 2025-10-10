@@ -195,24 +195,35 @@ class VisionService:
 
     def _build_analysis_prompt(self, app_name: str) -> str:
         """Build the analysis prompt for vision AI"""
-        return f"""Analyze this screenshot from {app_name} and extract productivity context.
+        return f"""Analyze this screenshot from {app_name} and identify what the user is ACTIVELY working on RIGHT NOW.
 
-Please provide:
+🎯 PRIMARY FOCUS - Identify the ACTIVE AREA:
+- Where is the cursor/focus?
+- What content is being typed/edited? (email draft, document, code, etc.)
+- What specific text is visible in the active area?
+- Is there a text input field or editor with content?
 
-1. **Current Task**: What is the user working on? (1-2 sentences)
-2. **UI Elements**: What key UI elements are visible? (list)
-3. **Context**: Relevant context for understanding their workflow (2-3 sentences)
-4. **Patterns**: Any notable patterns or workflows observed
-5. **Insights**: Brief productivity insights or suggestions
+📝 EXTRACT ACTIVE CONTENT:
+- If writing an email: Extract recipient, subject, body text
+- If writing a document: Extract visible paragraph/sentence
+- If coding: Extract function name, error messages, code snippet
+- If scheduling: Extract meeting details, times, participants
+- If browsing: Extract page title, key visible text
 
 Format your response as JSON with these keys:
-- task: string
-- ui_elements: array of strings
-- context: string
-- patterns: string
-- insights: string
 
-Focus on extracting information that would help provide intelligent productivity assistance."""
+{{
+  "task": "Brief description of what user is doing RIGHT NOW (e.g., 'Writing email to john@company.com', 'Fixing TypeError in process_data function')",
+  "active_content": "MOST IMPORTANT: The actual text/content being worked on (e.g., email body, code snippet, document text). Extract the specific words visible in the active area.",
+  "active_area": "Where the user is working (e.g., 'Email composer', 'Code editor line 45', 'Google Docs paragraph 3')",
+  "ui_elements": ["Key UI elements visible (buttons, menus, labels)"],
+  "context": "Additional context about the screen state and workflow",
+  "actionable_items": "Any specific items that could trigger actions (meeting times like '2pm tomorrow', email addresses like 'sarah@example.com', deadlines, etc.)",
+  "visible_text": ["Important specific text visible on screen (names, dates, keywords, etc.)"],
+  "screen_state": "Current state (composing, editing, viewing, error state, etc.)"
+}}
+
+CRITICAL: Focus on the ACTIVE AREA where content is being created/edited. Extract specific text, not just descriptions."""
 
     def _parse_analysis_response(self, response_text: str) -> Dict[str, Any]:
         """
@@ -249,8 +260,14 @@ Focus on extracting information that would help provide intelligent productivity
 
             return {
                 "task": parsed.get("task", ""),
+                "active_content": parsed.get("active_content", ""),
+                "active_area": parsed.get("active_area", ""),
                 "ui_elements": parsed.get("ui_elements", []),
                 "context": parsed.get("context", ""),
+                "actionable_items": parsed.get("actionable_items", ""),
+                "visible_text": parsed.get("visible_text", []),
+                "screen_state": parsed.get("screen_state", ""),
+                # Keep old fields for compatibility
                 "patterns": parsed.get("patterns", ""),
                 "insights": parsed.get("insights", "")
             }

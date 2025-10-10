@@ -479,6 +479,95 @@ class AIAssistant {
 
   }
 
+  /**
+   * Request immediate action analysis for typing-triggered detection
+   * Bypasses cooldown and sends high-priority request
+   */
+  async requestImmediateActionAnalysis(context) {
+    console.log(`🎯 [AI] Immediate action analysis requested`);
+    console.log(`   - App: ${context.appName}`);
+    console.log(`   - OCR lines: ${context.ocrText?.length || 0}`);
+    console.log(`   - Trigger: ${context.trigger}`);
+
+    try {
+      // Build single-app batch request with high priority
+      const batchRequest = {
+        user_id: this.userId || "550e8400-e29b-41d4-a716-446655440000",
+        session_id: this.sessionId || `session_${Date.now()}`,
+        sequence_metadata: {
+          sequence_id: `action_detect_${Date.now()}`,
+          total_apps: 1,
+          sequence_duration: 0,
+          rapid_switching: false,
+          unique_apps: 1,
+          trigger_reasons: [context.trigger || 'smart_action_detection'],
+          workflow_pattern: 'focused_typing'
+        },
+        app_sequence: [{
+          timestamp: context.timestamp || Date.now(),
+          appName: context.appName,
+          windowTitle: context.windowTitle || '',
+          bundleId: '',
+          ocrText: context.ocrText || [],
+          meaningful_context: '',
+          sequence: 0,
+          trigger_reason: context.trigger || 'smart_action_detection',
+          duration_in_app: 0,
+          application_type: '',
+          interaction_context: 'typing',
+          extracted_entities: []
+        }],
+        request_type: 'immediate_action_analysis',
+        context_signals: {
+          time_of_day: new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening',
+          day_of_week: new Date().getDay() === 0 || new Date().getDay() === 6 ? 'weekend' : 'weekday',
+          rapid_switching: false,
+          multi_domain: false,
+          priority: context.priority || 'high',
+          typing_triggered: true
+        }
+      };
+
+      // Send to batch-context endpoint
+      const response = await this.makeHttpRequest(`${this.backendUrl}/api/ai/batch-context`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(batchRequest)
+      });
+
+      console.log(`🎯 [AI] Immediate action analysis response received`);
+      console.log(`   - Suggestions: ${response.suggestions?.length || 0}`);
+
+      const suggestions = response.suggestions || [];
+
+      // Filter for actionable suggestions only
+      const actionableSuggestions = suggestions.filter(s =>
+        s.execution_mode === 'direct' && s.action_steps && s.action_steps.length > 0
+      );
+
+      console.log(`   - Actionable suggestions: ${actionableSuggestions.length}`);
+
+      // Send actionable suggestions to LLM chat window immediately
+      if (actionableSuggestions.length > 0 && global.llmChatWindow) {
+        global.llmChatWindow.webContents.send('ai-suggestions', {
+          aiSuggestions: actionableSuggestions,
+          appName: context.appName,
+          windowTitle: context.windowTitle,
+          trigger: 'immediate_action_detection'
+        });
+        console.log(`   ✅ Sent ${actionableSuggestions.length} actionable suggestions to LLM chat`);
+      }
+
+      return actionableSuggestions;
+
+    } catch (error) {
+      console.error('❌ [AI] Error in immediate action analysis:', error.message);
+      return [];
+    }
+  }
+
   async processBatchRequest(batchRequest) {
     console.log(`🤖 [AI] Sending batch request to backend...`);
     console.log(`   - URL: ${this.backendUrl}/api/ai/batch-context`);

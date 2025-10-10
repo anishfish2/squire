@@ -30,6 +30,8 @@ class Settings(BaseSettings):
 
     # Google settings
     GOOGLE_API_KEY: str
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
 
     # JWT/Auth settings
     SUPABASE_JWT_SECRET: str = ""  # Get from Supabase dashboard Settings > API > JWT Secret

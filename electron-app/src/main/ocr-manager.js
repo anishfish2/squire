@@ -12,7 +12,7 @@ class OCRManager {
     this.lastOCRContent = [];
     this.lastOCRTimestamp = 0;
     this.contentSimilarityThreshold = 0.8;
-    this.minTimeBetweenOCR = 5000;
+    this.minTimeBetweenOCR = 2000;
 
     this.wsManager = new WebSocketManager();
     this.pendingJobs = new Map();

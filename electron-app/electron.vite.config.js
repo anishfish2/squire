@@ -20,7 +20,8 @@ export default defineConfig({
           'node-global-key-listener',
           'node-mac-permissions',
           'socket.io-client',
-          'form-data'
+          'form-data',
+          'uiohook-napi'
         ]
       }
     }

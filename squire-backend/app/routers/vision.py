@@ -2,13 +2,14 @@
 Vision API Router
 Handles app preferences and vision analysis requests
 """
-from fastapi import APIRouter, HTTPException, Body, File, UploadFile, Form
+from fastapi import APIRouter, HTTPException, Body, File, UploadFile, Form, Depends
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 from app.core.database import supabase
 from app.services.s3_service import s3_service
 from app.services.vision_job_manager import vision_job_manager
+from app.middleware.auth import get_current_user, jwt_bearer
 
 router = APIRouter(prefix="/api/vision", tags=["vision"])
 
@@ -334,14 +335,14 @@ async def delete_screenshot(storage_path: str):
 
 # Vision Job Endpoints
 
-@router.post("/jobs/{user_id}")
+@router.post("/jobs", dependencies=[Depends(jwt_bearer)])
 async def create_vision_job(
-    user_id: str,
     file: UploadFile = File(...),
     app_name: str = Form(...),
     session_id: str = Form(...),
     allow_screenshots: bool = Form(False),
-    ocr_event_id: Optional[str] = Form(None)
+    ocr_event_id: Optional[str] = Form(None),
+    user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     Create a new vision job from screenshot upload.
@@ -353,17 +354,19 @@ async def create_vision_job(
     4. Queues for vision API processing
 
     Args:
-        user_id: User UUID
         file: Screenshot file (PNG)
         app_name: Application name
         session_id: Session UUID
         allow_screenshots: Whether to store screenshot in S3
         ocr_event_id: Optional OCR event to link
+        user: Current authenticated user (from JWT token)
 
     Returns:
         Vision job metadata
     """
     try:
+        # Extract user_id from authenticated user
+        user_id = user["id"]
         # Validate file type
         if file.content_type not in ["image/png", "image/jpeg", "image/jpg"]:
             raise HTTPException(

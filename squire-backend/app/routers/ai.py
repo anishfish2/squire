@@ -7,7 +7,7 @@ from typing import List, Dict, Any, Optional
 import openai
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID, uuid4
 
 from app.core.database import get_supabase, execute_query, DatabaseError
@@ -16,6 +16,7 @@ from app.services.ocr_service import PaddleOCRService
 from app.services.keystroke_analysis_service import KeystrokeAnalysisService
 from app.services.ocr_job_manager import OCRJobManager, JobPriority
 from app.services.vision_job_manager import vision_job_manager
+from app.services.action_detection_service import action_detection_service
 from app.models.schemas import (
     AIContextRequest,
     AIContextResponse,
@@ -881,9 +882,13 @@ async def build_batch_openai_prompt(request: BatchContextRequest, user_history: 
             sequence_context += f" - {app.windowTitle}"
         sequence_context += f" (trigger: {app.trigger_reason})\n"
 
-        # Use pre-extracted meaningful context only (never raw OCR)
+        # Use meaningful context, with OCR fallback
         if app.meaningful_context:
             sequence_context += f"   Context:\n{app.meaningful_context}\n"
+        elif app.ocrText and len(app.ocrText) > 0:
+            # Fallback to raw OCR if no meaningful context
+            ocr_sample = '\n   '.join(app.ocrText[:30])  # First 30 lines
+            sequence_context += f"   OCR Text:\n   {ocr_sample}\n"
         else:
             sequence_context += f"   Context: • No context available\n"
 
@@ -1047,42 +1052,145 @@ async def build_batch_openai_prompt(request: BatchContextRequest, user_history: 
                     history_context += f"• {title}\n"
                 history_context += f"IMPORTANT: Provide genuinely new suggestions that differ from recent ones.\n"
 
-    # Build comprehensive prompt with all context
-    prompt = f"""You are an AI assistant analyzing a detailed user workflow sequence to provide highly contextual suggestions.
+    # Identify the most recent/active app
+    latest_app = request.app_sequence[-1] if request.app_sequence else None
+    is_typing_triggered = request.context_signals.get('typing_triggered', False)
+
+    # Build current screen content with fallback
+    current_screen_content = 'No context available'
+    if latest_app:
+        if latest_app.meaningful_context:
+            current_screen_content = latest_app.meaningful_context
+        elif latest_app.ocrText and len(latest_app.ocrText) > 0:
+            current_screen_content = 'OCR Text:\n' + '\n'.join(latest_app.ocrText[:30])
+
+    # Build focused prompt emphasizing IMMEDIATE context
+    prompt = f"""You are an AI assistant analyzing what the user is doing RIGHT NOW.
+
+{'='*80}
+🎯 CURRENT FOCUS (What user is doing THIS MOMENT):
+{'='*80}
+
+ACTIVE APP: {latest_app.appName if latest_app else 'Unknown'}
+WINDOW: {latest_app.windowTitle if latest_app else ''}
+TRIGGER: {request.sequence_metadata.trigger_reasons[0] if request.sequence_metadata.trigger_reasons else 'unknown'}
+{"⌨️ USER IS ACTIVELY TYPING" if is_typing_triggered else ""}
+
+CURRENT SCREEN CONTENT (Most recent):
+{current_screen_content}
+
+{vision_context if vision_context else ''}
+
+{'='*80}
+📊 BACKGROUND CONTEXT (For reference only - DO NOT focus suggestions here):
+{'='*80}
 
 {sequence_context}
-{vision_context}
-{history_context}
+
+USER HISTORY & PATTERNS (Quick reference):
+{history_context[:500] if history_context else 'No history'}
 
 CONTEXT SIGNALS:
 • Time: {request.context_signals.get('time_of_day', 'unknown')} on {request.context_signals.get('day_of_week', 'unknown')}
-• Rapid switching: {request.context_signals.get('rapid_switching', False)}
-• Multi-domain: {request.context_signals.get('multi_domain', False)}
+• Typing triggered: {is_typing_triggered}
+• Priority: {request.context_signals.get('priority', 'normal')}
+
+{'='*80}
+🎯 CRITICAL INSTRUCTIONS:
+{'='*80}
 
 ANALYSIS INSTRUCTIONS:
-Analyze this complete workflow sequence using ALL available context:
-1. Screen content from each app in the sequence (OCR text) - Note specific text, file names, error messages, URLs, function names, variable names, etc.
-2. **Vision insights** from screenshots (UI elements, visual context, patterns) - Note specific UI states, button text, menu items, color schemes, layout patterns
-3. User's historical patterns and preferences - Reference SPECIFIC past behaviors, tools used, proficiency levels
-4. Keystroke patterns and tool usage - Note CONCRETE efficiency metrics and repetitive patterns
-5. Knowledge graph insights about user expertise - Cite SPECIFIC skills and proficiency levels
-6. The progression and timing of app transitions - Note EXACT sequences and durations
-7. Multi-level context analysis of current state - Reference SPECIFIC activities and goals
 
-CRITICAL REQUIREMENTS:
-Provide ONLY 1 highly intelligent, NON-OBVIOUS suggestion that:
-- **MUST be grounded in CONCRETE data from the context above** (cite specific OCR text, vision elements, historical patterns, or user proficiency)
-- **AVOID generic/obvious advice** like "take breaks", "organize files", "use keyboard shortcuts" unless you can cite SPECIFIC evidence of inefficiency
-- **Leverage SPECIFIC expertise from user history** (e.g., "Given your expert-level Python proficiency and your current TypeError in line 45...")
-- **Reference CONCRETE visual or textual evidence** (e.g., "Your screenshot shows 12 browser tabs open with Stack Overflow, suggesting...")
-- **Be hyper-specific to THIS moment** using actual data points from OCR, vision, or history
-- **Demonstrate deep pattern analysis** - connect dots between multiple context sources
-- Is personalized using ACTUAL demonstrated capabilities from knowledge graph
-- Provides ACTIONABLE steps with specific tool names, shortcuts, or workflows the user ACTUALLY uses
+🎯 **PRIMARY FOCUS**: Analyze what the user is doing RIGHT NOW in the ACTIVE APP.
 
-If you cannot provide a suggestion grounded in CONCRETE, SPECIFIC data from the context, return empty suggestions array.
+1. **START HERE**: Look at the "CURRENT FOCUS" section above
+   - What is the user actively working on?
+   - What text/content is visible on screen?
+   - What task are they trying to accomplish?
 
-**QUALITY OVER QUANTITY**: Return NOTHING rather than generic advice. Your suggestion must cite at least 2-3 concrete data points from the context above (specific OCR text, vision elements, historical metrics, or skill proficiency levels).
+2. **IMMEDIATE CONTEXT ONLY**:
+   - Focus on the most recent screen content
+   - Ignore background context unless directly relevant
+   - Look for actionable moments (writing emails, scheduling, coding errors, etc.)
+
+3. **BE SPECIFIC TO THE TASK**:
+   - If user is writing an email → suggest email-related actions
+   - If user is scheduling → suggest calendar actions
+   - If user sees an error → suggest debugging help
+   - If user is coding → suggest code-specific improvements
+
+4. **REFERENCE ONLY**: Use background context to avoid duplicates and personalize tone
+
+🤖 **TOOL CALLING - EXECUTE ACTIONS DIRECTLY**:
+
+You have access to these tools/functions that you can call:
+
+1. **calendar_create_event** - Create Google Calendar event
+   - title: string (required)
+   - start: ISO datetime (required) e.g. "2025-10-10T14:00:00"
+   - end: ISO datetime (required)
+   - description: string (optional)
+   - location: string (optional)
+   - attendees: array of email strings (optional)
+
+2. **gmail_create_draft** - Create Gmail draft email
+   - to: email address (required)
+   - subject: string (required)
+   - body: string (required)
+   - cc: email or array (optional)
+   - bcc: email or array (optional)
+
+**WHEN TO CALL TOOLS:**
+- User mentions "meeting", "call", "schedule" with a person and time → call calendar_create_event
+- User is drafting an email or mentions "email to [person]" → call gmail_create_draft
+- Parse dates/times from context (tomorrow = {(datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")})
+
+**CRITICAL EXAMPLES:**
+
+Example 1: User types "call with Soniya tomorrow at 2 PM"
+→ Return suggestion with:
+```json
+{{
+  "type": "task_completion",
+  "title": "Schedule call with Soniya Lakra",
+  "execution_mode": "direct",
+  "action_steps": [
+    {{
+      "action_type": "calendar_create_event",
+      "action_params": {{
+        "title": "Call with Soniya Lakra",
+        "start": "2025-10-10T14:00:00",
+        "end": "2025-10-10T15:00:00"
+      }},
+      "requires_approval": true,
+      "priority": 8
+    }}
+  ],
+  "content": {{ "description": "Detected calendar event mention. Create event?" }}
+}}
+```
+
+Example 2: User sees email UI with "draft to john@company.com about project"
+→ Return suggestion with execution_mode: "direct" and action_type: "gmail_create_draft"
+
+Example 3: Generic productivity tip (no direct context)
+→ Return normal suggestion WITHOUT execution_mode field
+
+**RULES:**
+✅ ALWAYS check if current screen shows actionable content (meetings, emails, etc.)
+✅ ALWAYS use execution_mode: "direct" when you can call a tool
+✅ ALWAYS parse dates/times accurately (today, tomorrow, next week, 2pm, etc.)
+✅ Set requires_approval: true for all tool calls
+❌ NEVER suggest manual steps if you can call a tool
+❌ NEVER ignore meeting/email mentions in current screen
+
+**QUALITY GATE**: Only suggest if you can answer "yes" to ALL:
+1. Is this based on CURRENT screen content?
+2. Is this related to what user is doing RIGHT NOW?
+3. Would this help with their IMMEDIATE task?
+4. Can I cite specific text/UI elements from CURRENT FOCUS section?
+
+If ANY answer is "no", return empty suggestions array.
 
 Return JSON format:
 {{
@@ -1785,6 +1893,38 @@ async def process_batch_context(request: BatchContextRequest):
         # Get user history for personalization
         user_history = await get_user_history(UUID(request.user_id)) if request.user_id else None
 
+        # 📝 EXTRACT MEANINGFUL CONTEXT from OCR if not provided
+        print(f"\n{'='*60}")
+        print(f"📝 [AI] EXTRACTING MEANINGFUL CONTEXT FROM OCR")
+        print(f"   Processing {len(request.app_sequence)} apps")
+
+        for i, app in enumerate(request.app_sequence):
+            if not app.meaningful_context and app.ocrText and len(app.ocrText) > 0:
+                print(f"   [{i+1}] {app.appName}: Extracting context from {len(app.ocrText)} OCR lines...")
+                try:
+                    meaningful_summary = await extract_meaningful_context(
+                        app.ocrText,
+                        app.appName,
+                        app.windowTitle
+                    )
+                    if meaningful_summary:
+                        app.meaningful_context = meaningful_summary
+                        print(f"       ✅ Extracted: {meaningful_summary[:100]}...")
+                    else:
+                        # Fallback: use raw OCR text (first 500 chars)
+                        app.meaningful_context = '\n'.join(app.ocrText[:20])
+                        print(f"       ⚠️ Using raw OCR (LLM extraction failed)")
+                except Exception as e:
+                    print(f"       ❌ Error: {e}")
+                    # Fallback: use raw OCR text
+                    app.meaningful_context = '\n'.join(app.ocrText[:20])
+            elif app.meaningful_context:
+                print(f"   [{i+1}] {app.appName}: Already has context ({len(app.meaningful_context)} chars)")
+            else:
+                print(f"   [{i+1}] {app.appName}: No OCR text available")
+
+        print(f"{'='*60}\n")
+
         # Build the LLM prompt (no raw OCR context - only meaningful summaries in prompt)
         prompt = await build_batch_openai_prompt(request, user_history)
 
@@ -1846,8 +1986,15 @@ async def process_batch_context(request: BatchContextRequest):
                     "personalization_factors": sug.get("personalization_factors", [])
                 })
             }
-            suggestions.append(transformed)
 
+            # ✅ Check if LLM returned tool calls (execution_mode: "direct")
+            if sug.get("execution_mode") == "direct" and sug.get("action_steps"):
+                transformed["execution_mode"] = "direct"
+                transformed["action_steps"] = sug.get("action_steps", [])
+                print(f"   🎯 LLM suggested direct action: {sug.get('title')}")
+                print(f"      Action steps: {len(sug.get('action_steps', []))}")
+
+            suggestions.append(transformed)
 
         # Filter duplicates if user history exists
         if user_history:

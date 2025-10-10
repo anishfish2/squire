@@ -66,11 +66,8 @@ class AuthStore {
         const now = Date.now()
         const timeUntilExpiry = expiresAt - now
 
-        console.log(`🔑 [AuthStore] Token expires in ${Math.floor(timeUntilExpiry / 1000 / 60)} minutes`)
-
         // Refresh if token expires in less than 5 minutes or is already expired
         if (timeUntilExpiry < 5 * 60 * 1000) {
-          console.log('🔄 [AuthStore] Token expired or expiring soon, refreshing...')
           await this.refreshAccessToken()
         }
       }
@@ -145,7 +142,7 @@ class AuthStore {
   getAccessToken() {
     try {
       if (this.accessToken) {
-        console.log('🔑 [AuthStore] Returning cached access token');
+        console.log('✅ [AuthStore] Returning cached token:', this.accessToken.substring(0, 20) + '...');
         return this.accessToken;
       }
 
@@ -153,17 +150,17 @@ class AuthStore {
       if (!stored) {
         console.error('❌ [AuthStore] No access token stored!');
         console.error('❌ [AuthStore] Store keys:', Object.keys(this.store));
+        console.error('❌ [AuthStore] Current user:', this.currentUser);
         return null;
       }
 
-      console.log('🔑 [AuthStore] Found stored token, decrypting...');
-      console.log('🔑 [AuthStore] Encryption available:', safeStorage.isEncryptionAvailable());
+      console.log('🔓 [AuthStore] Decrypting stored token...');
 
       if (safeStorage.isEncryptionAvailable()) {
         try {
           const buffer = Buffer.from(stored, 'base64')
           this.accessToken = safeStorage.decryptString(buffer)
-          console.log('✅ [AuthStore] Token decrypted successfully, length:', this.accessToken?.length);
+          console.log('✅ [AuthStore] Token decrypted successfully');
         } catch (decryptError) {
           console.error('❌ [AuthStore] Decryption failed:', decryptError);
           return null;
@@ -245,15 +242,12 @@ class AuthStore {
         throw new Error('No refresh token available')
       }
 
-      console.log('🔄 Refreshing access token...')
-
       const response = await axios.post(`${API_BASE_URL}/api/auth/refresh`, {
         refresh_token: refreshToken
       })
 
       if (response.data.access_token) {
         this.setTokens(response.data.access_token, response.data.refresh_token, response.data.user)
-        console.log('✅ Token refreshed successfully')
         return response.data.access_token
       }
 

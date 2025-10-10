@@ -1,4 +1,4 @@
-import { app, BrowserWindow, screen, ipcMain, Menu, dialog, systemPreferences, globalShortcut, desktopCapturer } from 'electron'
+import { app, BrowserWindow, screen, ipcMain, Menu, dialog, systemPreferences, globalShortcut, desktopCapturer, session } from 'electron'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import authStore from './auth-store.js'
@@ -10,6 +10,8 @@ import ComprehensiveActivityTracker from './activity-tracker.js'
 import AIAssistant from './ai-assistant.js'
 import EfficientKeystrokeCollector from './keystroke-collector.js'
 import VisionScheduler from './vision-scheduler.js'
+import SmartActionDetector from './smart-action-detector.js'
+import ContentChangeDetector from './content-change-detector.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -33,6 +35,8 @@ let activityTracker;
 let aiAssistant;
 let keystrokeCollector;
 let visionScheduler;
+let smartActionDetector;
+let contentChangeDetector;
 let recentActivityData = null;
 let skipNextOCR = false;
 let smartOCRScheduler = null;
@@ -91,6 +95,36 @@ function sendToSettings(channel, data) {
   }
 }
 
+async function clearGoogleCookies() {
+  const googleDomains = [
+    'https://accounts.google.com',
+    'https://www.google.com',
+    'https://clients.google.com',
+  ]
+
+  const defaultSession = session.defaultSession
+  for (const domain of googleDomains) {
+    try {
+      await defaultSession.cookies.get({ url: domain })
+        .then(cookies => {
+          cookies.forEach(cookie => {
+            const removalUrl = `${domain.split('/').slice(0,3).join('/')}${cookie.path}`
+            defaultSession.cookies.remove(removalUrl, cookie.name)
+          })
+        })
+    } catch (err) {
+      console.warn('⚠️ Failed to clear cookies for', domain, err)
+    }
+  }
+
+  // Also flush storage just to be safe
+  await defaultSession.clearStorageData({
+    origin: 'https://accounts.google.com',
+    storages: ['cookies', 'localstorage', 'indexdb']
+  })
+  console.log('🧹 Cleared Google OAuth cookies')
+}
+
 class SmartOCRScheduler {
   constructor(delay = 500) {
     this.delay = delay;
@@ -100,7 +134,7 @@ class SmartOCRScheduler {
     this.processCallback = null;
     this.lastOCRTime = 0;
     this.minTimeBetweenOCR = 5000;
-    this.fallbackInterval = 30000;
+    this.fallbackInterval = 15000;
     this.lastAppInfo = null;
     this.visionScheduler = null; // Will be set after construction
 
@@ -210,7 +244,7 @@ class OCRBatchManager {
   constructor() {
     this.pendingBatch = [];
     this.batchTimeout = null;
-    this.batchWindow = 30000;
+    this.batchWindow = 10000;
     this.maxBatchSize = 5;
     this.currentSequenceId = null;
     this.pendingOCRJobs = new Map();
@@ -478,10 +512,32 @@ class OCRBatchManager {
       };
     }
 
-    // Edge Case 5: Wait briefly for pending OCR jobs (simpler approach - submit immediately)
-    const incompletejobs = this.pendingBatch.filter(item => !item.ocrCompleted).length;
-    if (incompletejobs > 0) {
-      console.log(`⚠️ Force submit: ${incompletejobs} OCR jobs still pending, submitting anyway...`);
+    // Edge Case 5: Wait for pending OCR jobs to complete
+    const incompleteJobs = this.pendingBatch.filter(item => !item.ocrCompleted).length;
+    if (incompleteJobs > 0) {
+      console.log(`⏳ [OCRBatchManager] Waiting for ${incompleteJobs} pending OCR jobs to complete...`);
+
+      // Wait up to 10 seconds for OCR jobs to complete
+      const maxWaitTime = 10000;
+      const checkInterval = 500;
+      let waited = 0;
+
+      while (waited < maxWaitTime) {
+        const stillPending = this.pendingBatch.filter(item => !item.ocrCompleted).length;
+
+        if (stillPending === 0) {
+          console.log(`✅ [OCRBatchManager] All OCR jobs completed after ${waited}ms`);
+          break;
+        }
+
+        await new Promise(resolve => setTimeout(resolve, checkInterval));
+        waited += checkInterval;
+      }
+
+      const finalPending = this.pendingBatch.filter(item => !item.ocrCompleted).length;
+      if (finalPending > 0) {
+        console.log(`⚠️ [OCRBatchManager] ${finalPending} OCR jobs still pending after ${maxWaitTime}ms, proceeding anyway...`);
+      }
     }
 
     // Mark as processing
@@ -1327,8 +1383,13 @@ ipcMain.handle('auth-check', async () => {
   }
 })
 
+ipcMain.handle('get-auth-token', async () => {
+  return authStore.getAccessToken()
+})
+
 ipcMain.on('auth-google', async (event) => {
   console.log('🔵 Received auth-google IPC event')
+  await clearGoogleCookies()
   try {
     // Step 1: Get OAuth URL from backend
     console.log('📡 Requesting OAuth URL from backend...')
@@ -1452,6 +1513,18 @@ function setupPipelines() {
   }
 
   aiAssistant = new AIAssistant();
+  aiAssistant.userId = currentUserId;
+  aiAssistant.sessionId = currentSessionId;
+
+  // Initialize Smart Action Detector for typing-based action detection
+  smartActionDetector = new SmartActionDetector(aiAssistant, ocrManager);
+  smartActionDetector.start();
+  console.log('✨ [Main] SmartActionDetector started');
+
+  // Initialize Content Change Detector for monitoring actionable apps
+  contentChangeDetector = new ContentChangeDetector(ocrManager, aiAssistant);
+  contentChangeDetector.start();
+  console.log('✨ [Main] ContentChangeDetector started');
 
   keystrokeCollector = new EfficientKeystrokeCollector(processKeystrokeSequence);
 
@@ -1785,6 +1858,14 @@ app.on("before-quit", () => {
 
   if (visionScheduler) {
     visionScheduler.stopScheduling();
+  }
+
+  if (smartActionDetector) {
+    smartActionDetector.stop();
+  }
+
+  if (contentChangeDetector) {
+    contentChangeDetector.stop();
   }
 
   if (keystrokeCollector) {

@@ -91,6 +91,9 @@ function LLMChatApp() {
   // Suggestion notification state
   const [suggestionNotification, setSuggestionNotification] = useState(null)
 
+  // Force suggestion loading state
+  const [isForcingSuggestion, setIsForcingSuggestion] = useState(false)
+
   // Collapsed state
   const [isCollapsed, setIsCollapsed] = useState(false)
 
@@ -386,7 +389,17 @@ function LLMChatApp() {
 
   // Force suggestions
   const forceSuggestions = async () => {
-    await ipcRenderer.invoke('force-suggestion-request')
+    try {
+      setIsForcingSuggestion(true)
+      await ipcRenderer.invoke('force-suggestion-request')
+      // Reset after a delay to show completion
+      setTimeout(() => {
+        setIsForcingSuggestion(false)
+      }, 1000)
+    } catch (error) {
+      console.error('Error forcing suggestions:', error)
+      setIsForcingSuggestion(false)
+    }
   }
 
   // Handle notification click
@@ -776,15 +789,28 @@ function LLMChatApp() {
               onClick={forceSuggestions}
               onMouseEnter={() => setHoveredButton('suggest')}
               onMouseLeave={() => setHoveredButton(null)}
+              disabled={isForcingSuggestion}
               style={{
                 borderRadius: '20px',
-                transition: 'all 130ms ease-out'
+                transition: 'all 130ms ease-out',
+                cursor: isForcingSuggestion ? 'not-allowed' : 'pointer'
               }}
-              className="w-7 h-7 text-white/50 hover:text-blue-400 hover:bg-blue-500/10 flex items-center justify-center"
+              className={`w-7 h-7 flex items-center justify-center ${
+                isForcingSuggestion
+                  ? 'text-blue-400 bg-blue-500/10'
+                  : 'text-white/50 hover:text-blue-400 hover:bg-blue-500/10'
+              }`}
             >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path>
-              </svg>
+              {isForcingSuggestion ? (
+                <svg className="animate-spin" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" opacity="0.25"></circle>
+                  <path d="M12 2 A10 10 0 0 1 22 12" opacity="0.75"></path>
+                </svg>
+              ) : (
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path>
+                </svg>
+              )}
             </button>
           </Tooltip>
           <Tooltip text="Clear" show={hoveredButton === 'clear'}>
@@ -1115,6 +1141,10 @@ function LLMChatApp() {
 }
 
 function SuggestionCard({ suggestion, isExpanded, onToggle }) {
+  const [isExecuting, setIsExecuting] = useState(false)
+  const [executionResult, setExecutionResult] = useState(null)
+  const [executionError, setExecutionError] = useState(null)
+
   const formatTime = (timestamp) => {
     const date = new Date(timestamp)
     return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
@@ -1124,6 +1154,65 @@ function SuggestionCard({ suggestion, isExpanded, onToggle }) {
     e.preventDefault()
     e.stopPropagation()
     onToggle()
+  }
+
+  // Check if this suggestion is actionable
+  const isActionable = suggestion.execution_mode === 'direct' && suggestion.action_steps && suggestion.action_steps.length > 0
+
+  // Execute action
+  const executeAction = async () => {
+    if (!isActionable || isExecuting) return
+
+    setIsExecuting(true)
+    setExecutionError(null)
+    setExecutionResult(null)
+
+    try {
+      console.log('🚀 Executing action:', suggestion.action_steps)
+
+      // Get auth token from electron store
+      const authToken = await ipcRenderer.invoke('get-auth-token')
+      console.log('🔑 [Execute] Auth token:', authToken ? `${authToken.substring(0, 20)}...` : 'MISSING')
+
+      const headers = {
+        'Content-Type': 'application/json',
+      }
+
+      if (authToken) {
+        headers['Authorization'] = `Bearer ${authToken}`
+        console.log('✅ [Execute] Authorization header set')
+      } else {
+        console.error('❌ [Execute] No auth token available!')
+      }
+
+      const response = await fetch('http://localhost:8000/api/actions/execute-direct', {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({
+          action_steps: suggestion.action_steps,
+          suggestion_id: suggestion.id || null
+        })
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        // Handle authentication errors specifically
+        if (response.status === 401) {
+          throw new Error('Authentication required. Please open Settings and connect your Google account to execute actions.')
+        }
+        throw new Error(data.detail || data.error || `HTTP error! status: ${response.status}`)
+      }
+
+      console.log('✅ Action executed successfully:', data)
+      setExecutionResult(data)
+
+    } catch (error) {
+      console.error('❌ Error executing action:', error)
+      setExecutionError(error.message)
+    } finally {
+      setIsExecuting(false)
+    }
   }
 
   return (
@@ -1250,6 +1339,91 @@ function SuggestionCard({ suggestion, isExpanded, onToggle }) {
                 </div>
               )}
             </div>
+
+            {/* Execute Button for Actionable Suggestions */}
+            {isActionable && (
+              <div className="mt-4 space-y-2">
+                <button
+                  onClick={executeAction}
+                  disabled={isExecuting}
+                  className="w-full px-4 py-2.5 rounded-lg font-semibold text-sm transition-all flex items-center justify-center gap-2"
+                  style={{
+                    background: isExecuting
+                      ? 'rgba(71, 85, 105, 0.3)'
+                      : executionResult
+                      ? 'rgba(34, 197, 94, 0.2)'
+                      : 'rgba(59, 130, 246, 0.3)',
+                    border: `1px solid ${
+                      isExecuting
+                        ? 'rgba(71, 85, 105, 0.4)'
+                        : executionResult
+                        ? 'rgba(34, 197, 94, 0.4)'
+                        : 'rgba(59, 130, 246, 0.4)'
+                    }`,
+                    color: isExecuting ? 'rgba(255, 255, 255, 0.5)' : executionResult ? 'rgba(34, 197, 94, 0.9)' : 'rgba(147, 197, 253, 0.9)',
+                    cursor: isExecuting ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  {isExecuting ? (
+                    <>
+                      <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <circle cx="12" cy="12" r="10" opacity="0.25"></circle>
+                        <path d="M12 2 A10 10 0 0 1 22 12" opacity="0.75"></path>
+                      </svg>
+                      <span>Executing...</span>
+                    </>
+                  ) : executionResult ? (
+                    <>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                      </svg>
+                      <span>Executed Successfully</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                      </svg>
+                      <span>Execute Action</span>
+                    </>
+                  )}
+                </button>
+
+                {/* Execution Result */}
+                {executionResult && (
+                  <div className="p-3 rounded-lg" style={{
+                    background: 'rgba(34, 197, 94, 0.1)',
+                    border: '1px solid rgba(34, 197, 94, 0.3)'
+                  }}>
+                    <div className="text-xs text-green-400 font-medium mb-1">✓ Action Completed</div>
+                    <div className="text-xs text-white/60">
+                      {executionResult.successful_count || 0} of {executionResult.total_count || 0} actions executed successfully
+                    </div>
+                    {executionResult.results && executionResult.results.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        {executionResult.results.map((result, idx) => (
+                          <div key={idx} className="text-xs text-white/50">
+                            • {result.success ? '✓' : '✗'} {result.action_type || 'Action'}
+                            {result.data && result.data.title && ` - ${result.data.title}`}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Execution Error */}
+                {executionError && (
+                  <div className="p-3 rounded-lg" style={{
+                    background: 'rgba(239, 68, 68, 0.1)',
+                    border: '1px solid rgba(239, 68, 68, 0.3)'
+                  }}>
+                    <div className="text-xs text-red-400 font-medium mb-1">✗ Execution Failed</div>
+                    <div className="text-xs text-white/60">{executionError}</div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

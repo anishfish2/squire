@@ -46,7 +46,8 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "screenshot-desktop": "^1.12.7",
-    "socket.io-client": "^4.8.1"
+    "socket.io-client": "^4.8.1",
+    "uiohook-napi": "^1.5.4"
   },
   "build": {
     "appId": "com.anishkarthik.squire",
@@ -65,6 +66,7 @@
       "node_modules/active-win/**/*",
       "node_modules/@paymoapp/active-window/**/*",
       "node_modules/screenshot-desktop/**/*",
+      "node_modules/uiohook-napi/**/*",
       "**/*.node"
     ],
     "mac": {

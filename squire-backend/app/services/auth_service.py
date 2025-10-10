@@ -144,15 +144,10 @@ class AuthService:
             Decoded token payload if valid, None otherwise
         """
         try:
-            print(f"🔐 VERIFY TOKEN: Starting verification for token: {token[:30]}...")
-            print(f"🔐 VERIFY TOKEN: JWT Secret set? {bool(settings.SUPABASE_JWT_SECRET)}")
-
             # If JWT secret is not set, use Supabase's get_user method
             if not settings.SUPABASE_JWT_SECRET:
-                print("🔐 VERIFY TOKEN: No JWT secret, using Supabase get_user")
                 response = self.supabase.auth.get_user(token)
                 if response and response.user:
-                    print("✅ VERIFY TOKEN: User verified via Supabase")
                     return {
                         "sub": response.user.id,
                         "email": response.user.email,
@@ -160,27 +155,22 @@ class AuthService:
                         "aud": response.user.aud,
                         "role": response.user.role
                     }
-                print("❌ VERIFY TOKEN: Supabase verification failed")
                 return None
 
             # Verify with JWT secret
-            print(f"🔐 VERIFY TOKEN: Using JWT secret to decode")
             payload = jwt.decode(
                 token,
                 settings.SUPABASE_JWT_SECRET,
                 algorithms=[settings.JWT_ALGORITHM],
                 options={"verify_aud": False}  # Supabase uses specific audience
             )
-            print(f"✅ VERIFY TOKEN: Successfully decoded. Payload: {payload}")
             return payload
 
         except JWTError as e:
-            print(f"❌ VERIFY TOKEN: JWTError: {str(e)}")
+            print(f"❌ Token verification failed: {str(e)}")
             return None
         except Exception as e:
-            print(f"❌ VERIFY TOKEN: Exception: {str(e)}")
-            import traceback
-            print(f"❌ VERIFY TOKEN TRACEBACK: {traceback.format_exc()}")
+            print(f"❌ Token verification error: {str(e)}")
             return None
 
     async def get_user(self, token: str) -> Optional[Dict[str, Any]]:
@@ -194,13 +184,9 @@ class AuthService:
             User details if valid
         """
         try:
-            print(f"🔍 AUTH SERVICE: Getting user with token: {token[:30]}...")
             response = self.supabase.auth.get_user(token)
-            print(f"🔍 AUTH SERVICE: Response object: {response}")
 
             if response and response.user:
-                print(f"✅ AUTH SERVICE: User found: {response.user.id}")
-
                 # For now, skip profile query and just return user info
                 # The profile query was failing due to RLS
                 result = {
@@ -209,17 +195,14 @@ class AuthService:
                     "profile": None,  # Skip profile for now
                     "metadata": response.user.user_metadata
                 }
-                print(f"✅ AUTH SERVICE: Returning user data: {result}")
                 return result
 
-            print("❌ AUTH SERVICE: No user found in response")
             return None
 
         except Exception as e:
-            print(f"❌ AUTH SERVICE ERROR: {str(e)}")
-            import traceback
-            print(f"❌ AUTH SERVICE TRACEBACK: {traceback.format_exc()}")
+            print(f"❌ Error getting user: {str(e)}")
             return None
+
 
     async def sign_in_with_oauth(self, provider: str, redirect_to: str = None) -> Dict[str, Any]:
         """
@@ -233,14 +216,33 @@ class AuthService:
             Dict containing OAuth URL
         """
         try:
-            options = {}
-            if redirect_to:
-                options["redirect_to"] = redirect_to
+            oauth_params = {
+                "provider": provider
+            }
 
-            response = self.supabase.auth.sign_in_with_oauth({
-                "provider": provider,
-                "options": options
-            })
+            if redirect_to:
+                oauth_params["options"] = {"redirect_to": redirect_to}
+            else:
+                oauth_params["options"] = {}
+
+            # ✅ Force account selection for Google OAuth
+            if provider == "google":
+                # This ensures the user always sees the “Choose an account” screen
+                oauth_params["options"]["queryParams"] = {
+                    "prompt": "select_account",
+                    "access_type": "offline",
+                    "include_granted_scopes": "true"
+                }
+
+                # Also set top-level query_params for maximum reliability
+                oauth_params["query_params"] = {
+                    "prompt": "select_account",
+                    "access_type": "offline",
+                    "include_granted_scopes": "true"
+                }
+
+            print(f"📋 [OAuth] Request params: {oauth_params}")
+            response = self.supabase.auth.sign_in_with_oauth(oauth_params)
 
             return {
                 "url": response.url,
@@ -249,6 +251,7 @@ class AuthService:
 
         except Exception as e:
             raise Exception(f"OAuth sign-in error: {str(e)}")
+
 
     async def handle_oauth_callback(self, code: str, provider: str) -> Dict[str, Any]:
         """
