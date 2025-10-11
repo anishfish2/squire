@@ -19,9 +19,12 @@ router = APIRouter(prefix="/api/chat", tags=["llm"])
 
 
 class Message(BaseModel):
-    """Chat message model."""
-    role: str  # 'system', 'user', or 'assistant'
-    content: str
+    """Chat message model - supports OpenAI format."""
+    role: str  # 'system', 'user', 'assistant', or 'tool'
+    content: Optional[str] = None  # Can be null for assistant messages with tool_calls
+    tool_calls: Optional[List[Dict[str, Any]]] = None  # For assistant messages
+    tool_call_id: Optional[str] = None  # For tool response messages
+    name: Optional[str] = None  # For tool response messages
 
 
 class ChatRequest(BaseModel):
@@ -71,6 +74,72 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "calendar_search_events",
+            "description": "Search for calendar events by title and/or date range. Use this BEFORE updating events to find the event ID.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query to match against event titles (e.g., 'climbing', 'standup')"
+                    },
+                    "start_date": {
+                        "type": "string",
+                        "description": "Start of date range to search (ISO 8601 format, e.g., 2025-10-11T00:00:00Z). Defaults to today."
+                    },
+                    "end_date": {
+                        "type": "string",
+                        "description": "End of date range to search (ISO 8601 format). Defaults to 7 days from start_date."
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Maximum number of events to return (default: 10)"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calendar_update_event",
+            "description": "Update an existing calendar event. You must search for the event first using calendar_search_events to get the event_id.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "event_id": {
+                        "type": "string",
+                        "description": "The ID of the event to update (obtained from calendar_search_events)"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "New event title (optional)"
+                    },
+                    "start": {
+                        "type": "string",
+                        "description": "New start time in ISO 8601 format (optional)"
+                    },
+                    "end": {
+                        "type": "string",
+                        "description": "New end time in ISO 8601 format (optional)"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "New event description (optional)"
+                    },
+                    "location": {
+                        "type": "string",
+                        "description": "New event location (optional)"
+                    }
+                },
+                "required": ["event_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "gmail_create_draft",
             "description": "Create an email draft in Gmail",
             "parameters": {
@@ -102,8 +171,26 @@ async def generate_stream(request: ChatRequest):
         print(f"🚀 [LLM] Starting stream for model: {request.model}")
         logger.info(f"🚀 Starting stream for model: {request.model}")
 
-        # Convert Pydantic models to dicts
-        messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
+        # Convert Pydantic models to dicts, preserving all OpenAI fields
+        messages = []
+        for msg in request.messages:
+            message_dict = {"role": msg.role}
+
+            # Add content if present
+            if msg.content is not None:
+                message_dict["content"] = msg.content
+
+            # Add tool_calls for assistant messages
+            if msg.tool_calls is not None:
+                message_dict["tool_calls"] = msg.tool_calls
+
+            # Add tool response fields
+            if msg.tool_call_id is not None:
+                message_dict["tool_call_id"] = msg.tool_call_id
+            if msg.name is not None:
+                message_dict["name"] = msg.name
+
+            messages.append(message_dict)
 
         # Prepare kwargs
         kwargs = {}
@@ -225,8 +312,26 @@ async def chat_completion(request: ChatRequest):
         Complete response as JSON
     """
     try:
-        # Convert Pydantic models to dicts
-        messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
+        # Convert Pydantic models to dicts, preserving all OpenAI fields
+        messages = []
+        for msg in request.messages:
+            message_dict = {"role": msg.role}
+
+            # Add content if present
+            if msg.content is not None:
+                message_dict["content"] = msg.content
+
+            # Add tool_calls for assistant messages
+            if msg.tool_calls is not None:
+                message_dict["tool_calls"] = msg.tool_calls
+
+            # Add tool response fields
+            if msg.tool_call_id is not None:
+                message_dict["tool_call_id"] = msg.tool_call_id
+            if msg.name is not None:
+                message_dict["name"] = msg.name
+
+            messages.append(message_dict)
 
         # Prepare kwargs
         kwargs = {}

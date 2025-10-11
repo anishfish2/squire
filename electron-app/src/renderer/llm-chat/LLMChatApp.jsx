@@ -4,6 +4,126 @@ import '@/styles.css'
 
 const { ipcRenderer } = window.require('electron')
 
+// Helper function to extract time from user message and convert to 24-hour format
+const extractTimeFromMessage = (message) => {
+  if (!message) return null
+
+  // Patterns to match various time formats
+  // Match: "6pm", "6 pm", "6:00pm", "6:00 pm", "18:00", etc.
+  const timePatterns = [
+    /(\d{1,2}):?(\d{2})?\s*(am|pm)/gi,  // 6pm, 6:00pm, 6 pm, 6:00 pm
+    /(\d{1,2}):(\d{2})/g                 // 18:00, 6:00 (24-hour)
+  ]
+
+  for (const pattern of timePatterns) {
+    const matches = message.match(pattern)
+    if (matches && matches.length > 0) {
+      const timeStr = matches[matches.length - 1] // Get last match (most relevant)
+      console.log('🕐 [Time Parser] Found time in message:', timeStr)
+
+      // Parse the time
+      const ampmMatch = timeStr.match(/(\d{1,2}):?(\d{2})?\s*(am|pm)/i)
+      if (ampmMatch) {
+        let hour = parseInt(ampmMatch[1])
+        const minute = ampmMatch[2] ? parseInt(ampmMatch[2]) : 0
+        const ampm = ampmMatch[3].toLowerCase()
+
+        // Convert to 24-hour
+        if (ampm === 'pm' && hour !== 12) {
+          hour += 12
+        } else if (ampm === 'am' && hour === 12) {
+          hour = 0
+        }
+
+        console.log(`   Converted to 24-hour: ${hour}:${minute.toString().padStart(2, '0')}`)
+        return { hour, minute }
+      }
+
+      // Try 24-hour format
+      const timeMatch = timeStr.match(/(\d{1,2}):(\d{2})/)
+      if (timeMatch) {
+        const hour = parseInt(timeMatch[1])
+        const minute = parseInt(timeMatch[2])
+        console.log(`   Already 24-hour: ${hour}:${minute.toString().padStart(2, '0')}`)
+        return { hour, minute }
+      }
+    }
+  }
+
+  return null
+}
+
+// Helper function to correct time in datetime string based on user's intent
+const correctTimeInDatetime = (datetimeStr, userMessage) => {
+  if (!datetimeStr || !userMessage) return datetimeStr
+
+  try {
+    const extractedTime = extractTimeFromMessage(userMessage)
+    if (!extractedTime) {
+      console.log('⚠️ [Time Correction] No time found in user message, returning as-is')
+      return datetimeStr
+    }
+
+    // Parse the datetime string
+    const match = datetimeStr.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(.*)$/)
+    if (!match) {
+      console.log('⚠️ [Time Correction] Could not parse datetime string:', datetimeStr)
+      return datetimeStr
+    }
+
+    const [, date, currentHour, currentMinute, currentSecond, timezone] = match
+    const currentHourInt = parseInt(currentHour)
+
+    // Check if the hour matches what the user requested
+    if (currentHourInt !== extractedTime.hour) {
+      console.log(`🔧 [Time Correction] MISMATCH DETECTED!`)
+      console.log(`   User requested: ${extractedTime.hour}:${extractedTime.minute.toString().padStart(2, '0')}`)
+      console.log(`   LLM generated: ${currentHour}:${currentMinute}`)
+      console.log(`   CORRECTING to user's requested time...`)
+
+      const correctedDatetime = `${date}T${extractedTime.hour.toString().padStart(2, '0')}:${extractedTime.minute.toString().padStart(2, '0')}:${currentSecond}${timezone}`
+      console.log(`   ✅ Corrected datetime: ${correctedDatetime}`)
+      return correctedDatetime
+    }
+
+    console.log('✓ [Time Correction] LLM generated correct time, no correction needed')
+    return datetimeStr
+
+  } catch (error) {
+    console.error('❌ [Time Correction] Error:', error)
+    return datetimeStr
+  }
+}
+
+// Helper function to add user's timezone offset to datetime string
+const addTimezoneOffset = (datetimeStr) => {
+  if (!datetimeStr || typeof datetimeStr !== 'string') return datetimeStr
+
+  try {
+    // If it already has a timezone offset, return as-is
+    if (datetimeStr.includes('+') || datetimeStr.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(datetimeStr)) {
+      console.log('✓ [Timezone] Already has offset:', datetimeStr)
+      return datetimeStr
+    }
+
+    // Get user's current timezone offset
+    const now = new Date()
+    const timezoneOffset = -now.getTimezoneOffset() / 60
+    const timezoneOffsetStr = timezoneOffset >= 0
+      ? `+${String(timezoneOffset).padStart(2, '0')}:00`
+      : `-${String(Math.abs(timezoneOffset)).padStart(2, '0')}:00`
+
+    // Append timezone offset
+    const withTimezone = `${datetimeStr}${timezoneOffsetStr}`
+    console.log(`🕐 [Timezone] Added offset: ${datetimeStr} → ${withTimezone}`)
+
+    return withTimezone
+  } catch (error) {
+    console.error('❌ [Timezone] Error adding offset:', error)
+    return datetimeStr
+  }
+}
+
 // Tooltip component
 const Tooltip = ({ text, hotkey, children, show }) => (
   <div className="relative inline-block">
@@ -67,7 +187,7 @@ const MODELS = [
 function LLMChatApp() {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
-  const [selectedModel, setSelectedModel] = useState('gpt-4')
+  const [selectedModel, setSelectedModel] = useState('gpt-4o')
   const [isLoading, setIsLoading] = useState(false)
   const [isHovered, setIsHovered] = useState(false)
   const messagesEndRef = useRef(null)
@@ -198,6 +318,328 @@ function LLMChatApp() {
     }
   }, [])
 
+  // Execute search actions and continue conversation
+  const executeSearchAndContinue = async (actionSteps, assistantMessageId, userMessageContent) => {
+    try {
+      console.log('🔍 [executeSearchAndContinue] Executing search actions:', actionSteps)
+
+      // Get auth token
+      const authToken = await ipcRenderer.invoke('get-auth-token')
+      if (!authToken) {
+        throw new Error('Not authenticated. Please log in to execute actions.')
+      }
+
+      // Execute search actions
+      const response = await fetch('http://localhost:8000/api/actions/execute-direct', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        },
+        body: JSON.stringify({
+          action_steps: actionSteps.map(step => ({
+            action_type: step.action_type,
+            action_params: step.action_params
+          })),
+          suggestion_id: null
+        })
+      })
+
+      const data = await response.json()
+      console.log('📥 [executeSearchAndContinue] Search results:', data)
+
+      if (!response.ok) {
+        throw new Error(data.detail || 'Failed to execute search')
+      }
+
+      // Log search results with timezone info
+      if (data.results && data.results.length > 0) {
+        data.results.forEach((result, idx) => {
+          if (result.success && result.data && result.data.events) {
+            console.log(`🔍 [TIMEZONE DEBUG] Search results for query "${result.data.query}":`)
+            result.data.events.forEach((event, eventIdx) => {
+              console.log(`   Event ${eventIdx + 1}: "${event.title}"`)
+              console.log(`      Start: ${event.start} ← Time from Google Calendar`)
+              console.log(`      End: ${event.end} ← Time from Google Calendar`)
+              console.log(`      Event ID: ${event.event_id}`)
+            })
+          }
+        })
+      }
+
+      // Format tool results for GPT-4
+      // Build tool response messages
+      const toolMessages = actionSteps.map((step, idx) => {
+        const result = data.results[idx]
+        return {
+          role: 'tool',
+          tool_call_id: step.tool_call_id,
+          name: step.action_type,
+          content: JSON.stringify(result.data)
+        }
+      })
+
+      console.log('🔧 [executeSearchAndContinue] Tool messages being sent to LLM:', toolMessages)
+
+      // Update the assistant message to show search results
+      setMessages(prev => prev.map(msg =>
+        msg.id === assistantMessageId
+          ? {
+              ...msg,
+              content: msg.content || 'Searching calendar...',
+              isStreaming: false,
+              searchResults: data.results
+            }
+          : msg
+      ))
+
+      // Get current conversation history
+      const currentMessages = messages.filter(m => m.role === 'user' || m.role === 'assistant')
+
+      // Add system message with date/time context
+      const today = new Date()
+      const dateString = today.toISOString().split('T')[0]
+      const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+      const timezoneOffset = -today.getTimezoneOffset() / 60
+      const timezoneOffsetStr = timezoneOffset >= 0 ? `+${String(timezoneOffset).padStart(2, '0')}:00` : `-${String(Math.abs(timezoneOffset)).padStart(2, '0')}:00`
+
+      const systemMessage = {
+        role: 'system',
+        content: `You are a helpful AI assistant with access to Google Calendar and Gmail tools.
+
+⚠️ TIME FORMAT - SUPER SIMPLE ⚠️
+Current date: ${dateString}
+Current time: ${today.toLocaleTimeString()}
+
+🕐 Convert times to 24-hour format (military time):
+- 6pm → 18:00
+- 9pm → 21:00
+- 2pm → 14:00
+- 10am → 10:00
+
+✅ CORRECT FORMAT: "${dateString}T<HOUR>:00:00"
+Where <HOUR> is 24-hour format (00-23)
+
+📅 DATE HANDLING:
+- "today" → ${dateString}
+- "tomorrow" → ${new Date(today.getTime() + 86400000).toISOString().split('T')[0]}
+- "yesterday" → ${new Date(today.getTime() - 86400000).toISOString().split('T')[0]}
+
+⚠️ CRITICAL: When updating event dates/times, you MUST update BOTH start AND end times!
+If changing the date, update the date in BOTH start and end.
+If changing the time, update BOTH start and end times, keeping the same duration.
+
+🔴 DO NOT add timezone info (no Z, no +00:00, no -07:00) - just the time!`
+      }
+
+      // Build the assistant message with tool_calls for OpenAI format
+      const assistantToolCallMessage = {
+        role: 'assistant',
+        content: null,
+        tool_calls: actionSteps.map(step => ({
+          id: step.tool_call_id,
+          type: 'function',
+          function: {
+            name: step.action_type,
+            arguments: JSON.stringify(step.action_params)
+          }
+        }))
+      }
+
+      // Build messages array for continuation
+      const continuationMessages = [
+        systemMessage,
+        ...currentMessages.slice(0, -1).map(m => ({  // Exclude the last assistant message (it's being replaced with tool call version)
+          role: m.role,
+          content: m.content
+        })),
+        assistantToolCallMessage,  // Add assistant message with tool_calls
+        ...toolMessages  // Add tool results
+      ]
+
+      console.log('📤 [executeSearchAndContinue] Sending continuation request with messages:', continuationMessages.length)
+
+      // Create new assistant message for continuation
+      const continuationMessageId = Date.now() + 1
+      setMessages(prev => [...prev, {
+        id: continuationMessageId,
+        role: 'assistant',
+        content: '',
+        timestamp: new Date().toISOString(),
+        isStreaming: true,
+        model: selectedModel
+      }])
+
+      // Continue conversation with GPT-4
+      const continuationResponse = await fetch('http://localhost:8000/api/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: selectedModel,
+          messages: continuationMessages,
+          stream: true
+        }),
+        signal: abortControllerRef.current?.signal
+      })
+
+      if (!continuationResponse.ok) {
+        throw new Error(`HTTP error! status: ${continuationResponse.status}`)
+      }
+
+      // Stream the continuation response
+      const reader = continuationResponse.body.getReader()
+      const decoder = new TextDecoder()
+      let accumulatedContent = ''
+      let continuationToolCalls = []
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        const chunk = decoder.decode(value)
+        const lines = chunk.split('\n')
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6)
+            if (data === '[DONE]') break
+
+            try {
+              const parsed = JSON.parse(data)
+
+              // Handle text content
+              if (parsed.content) {
+                accumulatedContent += parsed.content
+                setMessages(prev => prev.map(msg =>
+                  msg.id === continuationMessageId
+                    ? { ...msg, content: accumulatedContent }
+                    : msg
+                ))
+              }
+
+              // Handle tool calls in continuation
+              if (parsed.tool_call) {
+                const existingIndex = continuationToolCalls.findIndex(tc => tc.id === parsed.tool_call.id)
+                if (existingIndex >= 0) {
+                  if (parsed.tool_call.arguments) {
+                    continuationToolCalls[existingIndex].arguments += parsed.tool_call.arguments
+                  }
+                } else {
+                  continuationToolCalls.push({
+                    id: parsed.tool_call.id,
+                    name: parsed.tool_call.name || '',
+                    arguments: parsed.tool_call.arguments || ''
+                  })
+                }
+              }
+            } catch (e) {
+              console.error('Error parsing continuation SSE:', e)
+            }
+          }
+        }
+      }
+
+      // Handle any tool calls from continuation (e.g., calendar_update_event)
+      if (continuationToolCalls.length > 0) {
+        console.log('🔧 [executeSearchAndContinue] Continuation returned tool calls:', continuationToolCalls)
+
+        // Use the passed user message for time correction
+        console.log('📝 [executeSearchAndContinue] Original user message:', userMessageContent)
+
+        // Convert to action steps
+        const continuationActionSteps = continuationToolCalls.map(tc => {
+          if (!tc.arguments || tc.arguments.trim() === '') return null
+
+          const args = JSON.parse(tc.arguments)
+
+          if (tc.name === 'calendar_update_event') {
+            // Apply time correction and add timezone offset
+            const correctedStart = addTimezoneOffset(correctTimeInDatetime(args.start, userMessageContent))
+            const correctedEnd = args.end ? addTimezoneOffset(correctTimeInDatetime(args.end, userMessageContent)) : undefined
+
+            return {
+              tool_call_id: tc.id,
+              action_type: 'calendar_update_event',
+              action_params: {
+                event_id: args.event_id,
+                title: args.title,
+                start: correctedStart,
+                end: correctedEnd,
+                description: args.description,
+                location: args.location
+              }
+            }
+          } else if (tc.name === 'calendar_create_event') {
+            // Apply time correction and add timezone offset
+            const correctedStart = addTimezoneOffset(correctTimeInDatetime(args.start, userMessageContent))
+            const correctedEnd = args.end ? addTimezoneOffset(correctTimeInDatetime(args.end, userMessageContent)) : undefined
+
+            return {
+              tool_call_id: tc.id,
+              action_type: 'calendar_create_event',
+              action_params: {
+                title: args.title,
+                start: correctedStart,
+                end: correctedEnd,
+                description: args.description,
+                location: args.location
+              }
+            }
+          }
+
+          return null
+        }).filter(Boolean)
+
+        // Show as actionable for user confirmation
+        if (continuationActionSteps.length > 0) {
+          setMessages(prev => prev.map(msg =>
+            msg.id === continuationMessageId
+              ? {
+                  ...msg,
+                  isStreaming: false,
+                  isActionable: true,
+                  action_steps: continuationActionSteps,
+                  execution_mode: 'direct',
+                  original_user_message: userMessageContent  // Store for later time correction
+                }
+              : msg
+          ))
+        } else {
+          setMessages(prev => prev.map(msg =>
+            msg.id === continuationMessageId
+              ? { ...msg, isStreaming: false }
+              : msg
+          ))
+        }
+      } else {
+        // No tool calls, just mark as complete
+        setMessages(prev => prev.map(msg =>
+          msg.id === continuationMessageId
+            ? { ...msg, isStreaming: false }
+            : msg
+        ))
+      }
+
+      setIsLoading(false)
+
+    } catch (error) {
+      console.error('❌ [executeSearchAndContinue] Error:', error)
+      setMessages(prev => prev.map(msg =>
+        msg.id === assistantMessageId
+          ? {
+              ...msg,
+              content: `Error during search: ${error.message}`,
+              isError: true,
+              isStreaming: false
+            }
+          : msg
+      ))
+      setIsLoading(false)
+    }
+  }
+
   // Send message to LLM
   // Detect actions from user message
   const detectAndShowActions = async (userMessage) => {
@@ -285,12 +727,69 @@ function LLMChatApp() {
       // Create abort controller for cancellation
       abortControllerRef.current = new AbortController()
 
-      // Add system message with current date context
+      // Add system message with current date and timezone context
       const today = new Date()
       const dateString = today.toISOString().split('T')[0] // YYYY-MM-DD
+      const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone // e.g., "America/Los_Angeles"
+      const timezoneOffset = -today.getTimezoneOffset() / 60 // e.g., -7 for PDT
+      const timezoneOffsetStr = timezoneOffset >= 0 ? `+${String(timezoneOffset).padStart(2, '0')}:00` : `-${String(Math.abs(timezoneOffset)).padStart(2, '0')}:00`
+
       const systemMessage = {
         role: 'system',
-        content: `You are a helpful AI assistant with access to Google Calendar and Gmail tools. Today's date is ${dateString}. When scheduling events, use ISO 8601 datetime format with timezone (e.g., "${dateString}T14:00:00Z" for 2pm). For "tomorrow", add 1 day to today's date. For "today at 2pm", use "${dateString}T14:00:00Z".`
+        content: `You are a helpful AI assistant with access to Google Calendar and Gmail tools.
+
+⚠️ TIME FORMAT - SUPER SIMPLE ⚠️
+Current date: ${dateString}
+Current time: ${today.toLocaleTimeString()}
+
+🕐 Convert times to 24-hour format (military time):
+- 6pm → 18:00
+- 9pm → 21:00
+- 2pm → 14:00
+- 10am → 10:00
+
+✅ CORRECT FORMAT: "${dateString}T<HOUR>:00:00"
+Where <HOUR> is 24-hour format (00-23)
+
+📋 EXAMPLES:
+User: "meeting at 6pm" → start="${dateString}T18:00:00"
+User: "event at 2pm" → start="${dateString}T14:00:00"
+User: "call at 10am" → start="${dateString}T10:00:00"
+
+🔴 DO NOT add timezone info (no Z, no +00:00, no -07:00) - just the time!
+
+📅 DATE HANDLING:
+- "today" → ${dateString}
+- "tomorrow" → ${new Date(today.getTime() + 86400000).toISOString().split('T')[0]}
+- "yesterday" → ${new Date(today.getTime() - 86400000).toISOString().split('T')[0]}
+
+⚠️ CRITICAL: When updating event dates/times, you MUST update BOTH start AND end times!
+
+EDITING CALENDAR EVENTS:
+To edit/update an event, you MUST follow this two-step process:
+1. First, use calendar_search_events to find the event and get its event_id
+2. Then, use calendar_update_event with the event_id to make changes
+
+Example workflows:
+
+1. Moving event to different time (same day):
+User: "Move my climbing event to 3pm"
+→ calendar_update_event(event_id="...", start="YYYY-MM-DDT15:00:00", end="YYYY-MM-DDT17:00:00")
+Note: Update BOTH start and end times, keeping the same duration
+
+2. Moving event to different day:
+User: "Move my climbing event from tomorrow to today"
+Current event: start="2025-10-12T10:00:00", end="2025-10-12T12:00:00"
+→ calendar_update_event(event_id="...", start="${dateString}T10:00:00", end="${dateString}T12:00:00")
+⚠️ IMPORTANT: Change the date in BOTH start AND end times to "${dateString}"
+
+3. Moving event to different day AND time:
+User: "Move my meeting from tomorrow to today at 2pm"
+→ calendar_update_event(event_id="...", start="${dateString}T14:00:00", end="${dateString}T16:00:00")
+Update date AND time in BOTH fields
+
+If search returns multiple events, ask the user to clarify which one to update.
+If search returns zero events, tell the user no matching events were found.`
       }
 
       const requestBody = {
@@ -406,18 +905,53 @@ function LLMChatApp() {
             const args = JSON.parse(tc.arguments)
 
             if (tc.name === 'calendar_create_event') {
+              // Apply time correction and add timezone offset
+              const correctedStart = addTimezoneOffset(correctTimeInDatetime(args.start, userMessage.content))
+              const correctedEnd = args.end ? addTimezoneOffset(correctTimeInDatetime(args.end, userMessage.content)) : undefined
+
               return {
+                tool_call_id: tc.id,
                 action_type: 'calendar_create_event',
                 action_params: {
                   title: args.title,
-                  start: args.start,
-                  end: args.end,
+                  start: correctedStart,
+                  end: correctedEnd,
+                  description: args.description,
+                  location: args.location
+                }
+              }
+            } else if (tc.name === 'calendar_search_events') {
+              // Add timezone offset to search dates
+              return {
+                tool_call_id: tc.id,
+                action_type: 'calendar_search_events',
+                action_params: {
+                  query: args.query,
+                  start_date: addTimezoneOffset(args.start_date),
+                  end_date: addTimezoneOffset(args.end_date),
+                  max_results: args.max_results
+                }
+              }
+            } else if (tc.name === 'calendar_update_event') {
+              // Apply time correction and add timezone offset
+              const correctedStart = addTimezoneOffset(correctTimeInDatetime(args.start, userMessage.content))
+              const correctedEnd = args.end ? addTimezoneOffset(correctTimeInDatetime(args.end, userMessage.content)) : undefined
+
+              return {
+                tool_call_id: tc.id,
+                action_type: 'calendar_update_event',
+                action_params: {
+                  event_id: args.event_id,
+                  title: args.title,
+                  start: correctedStart,
+                  end: correctedEnd,
                   description: args.description,
                   location: args.location
                 }
               }
             } else if (tc.name === 'gmail_create_draft') {
               return {
+                tool_call_id: tc.id,  // Preserve tool call ID
                 action_type: 'gmail_create_draft',
                 action_params: {
                   to: args.to,
@@ -431,11 +965,29 @@ function LLMChatApp() {
 
           if (actionSteps.length > 0) {
             console.log('📋 Converted to action steps:', actionSteps)
+
+            // Check if any action is a "search" (information gathering) vs "action" (execution)
+            const hasSearchOnly = actionSteps.every(step => step.action_type.includes('search'))
+            const hasSearch = actionSteps.some(step => step.action_type.includes('search'))
+
+            // If it's only search queries, auto-execute them and continue the conversation
+            if (hasSearchOnly) {
+              console.log('🔍 Search-only request detected, auto-executing and continuing conversation...')
+              console.log('📝 [BEFORE CALL] userMessage:', userMessage)
+              console.log('📝 [BEFORE CALL] userMessage.content:', userMessage.content)
+
+              // Execute search immediately
+              await executeSearchAndContinue(actionSteps, assistantMessageId, userMessage.content)
+              return // Exit early, executeSearchAndContinue will handle the rest
+            }
+
+            // Otherwise, show as actionable for user confirmation
             finalMessage = {
               ...finalMessage,
               isActionable: true,
               action_steps: actionSteps,
-              execution_mode: 'direct'
+              execution_mode: 'direct',
+              original_user_message: userMessage.content  // Store for later time correction
             }
           }
         } catch (error) {
@@ -1568,44 +2120,91 @@ function SuggestionCard({ suggestion, isExpanded, onToggle }) {
 
                 {/* Execution Result */}
                 {executionResult && (
-                  <div className="p-3 rounded-lg space-y-2" style={{
+                  <div className="rounded-lg overflow-hidden" style={{
                     background: 'rgba(34, 197, 94, 0.1)',
                     border: '1px solid rgba(34, 197, 94, 0.3)'
                   }}>
-                    <div className="text-xs text-green-400 font-medium">✓ Action Completed</div>
-                    <div className="text-xs text-white/60">
-                      {executionResult.successful_actions || 0} of {executionResult.total_actions || 0} actions executed successfully
-                    </div>
                     {executionResult.results && executionResult.results.length > 0 && (
-                      <div className="mt-2 space-y-2">
-                        {executionResult.results.map((result, idx) => (
-                          result.success && result.data && (
-                            <div key={idx} className="text-xs space-y-1">
-                              {result.data.title && (
-                                <div className="text-white/70">📅 {result.data.title}</div>
-                              )}
-                              {result.data.start && (
-                                <div className="text-[11px] text-white/50">
-                                  {new Date(result.data.start).toLocaleString()}
+                      <div className="space-y-0">
+                        {executionResult.results.map((result, idx) => {
+                          // Handle search results (multiple events)
+                          if (result.success && result.data && result.data.events) {
+                            return (
+                              <div key={idx} className="p-3 space-y-2">
+                                <div className="text-white/70 text-xs font-medium mb-2">
+                                  🔍 Found {result.data.count} event{result.data.count !== 1 ? 's' : ''} matching "{result.data.query}"
                                 </div>
-                              )}
-                              {result.data.html_link && (
-                                <a
-                                  href={result.data.html_link}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 underline text-xs"
-                                  onClick={(e) => {
-                                    e.preventDefault()
-                                    window.require('electron').shell.openExternal(result.data.html_link)
-                                  }}
-                                >
-                                  View in Google Calendar →
-                                </a>
-                              )}
-                            </div>
-                          )
-                        ))}
+                                {result.data.events.map((event, eventIdx) => (
+                                  <div key={eventIdx} className="ml-4 p-2 rounded border border-white/10 bg-white/5 space-y-1">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-sm">📅</span>
+                                      <span className="text-white/90 text-xs font-medium">{event.title}</span>
+                                    </div>
+                                    {event.start && (
+                                      <div className="text-white/60 text-[11px] pl-5">
+                                        {new Date(event.start).toLocaleString('en-US', {
+                                          weekday: 'short',
+                                          month: 'short',
+                                          day: 'numeric',
+                                          hour: 'numeric',
+                                          minute: '2-digit',
+                                          hour12: true
+                                        })}
+                                      </div>
+                                    )}
+                                    <div className="text-white/40 text-[10px] pl-5 font-mono">ID: {event.event_id.substring(0, 12)}...</div>
+                                  </div>
+                                ))}
+                              </div>
+                            )
+                          }
+
+                          // Handle single event results (create/update)
+                          if (result.success && result.data) {
+                            return (
+                              <div key={idx} className="p-3 space-y-2">
+                                {result.data.title && (
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-base">📅</span>
+                                    <span className="text-white/90 font-medium text-xs">{result.data.title}</span>
+                                  </div>
+                                )}
+                                {result.data.start && (
+                                  <div className="text-white/60 text-[11px] pl-6">
+                                    {new Date(result.data.start).toLocaleString('en-US', {
+                                      weekday: 'short',
+                                      month: 'short',
+                                      day: 'numeric',
+                                      hour: 'numeric',
+                                      minute: '2-digit',
+                                      hour12: true
+                                    })}
+                                  </div>
+                                )}
+                                {result.data.html_link && (
+                                  <a
+                                    href={result.data.html_link}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1.5 text-blue-400 hover:text-blue-300 transition-colors pl-6 group text-xs"
+                                    onClick={(e) => {
+                                      e.preventDefault()
+                                      window.require('electron').shell.openExternal(result.data.html_link)
+                                    }}
+                                  >
+                                    <span>View in Google Calendar</span>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="group-hover:translate-x-0.5 transition-transform">
+                                      <line x1="5" y1="12" x2="19" y2="12"></line>
+                                      <polyline points="12 5 19 12 12 19"></polyline>
+                                    </svg>
+                                  </a>
+                                )}
+                              </div>
+                            )
+                          }
+
+                          return null
+                        })}
                       </div>
                     )}
                   </div>
@@ -1649,6 +2248,8 @@ function ChatMessage({ message }) {
   const executeAction = async () => {
     if (!isAction || isExecuting) return
 
+    console.log('🚀🚀🚀 [Execute] NEW CODE LOADED - Starting execution with time correction')
+
     setIsExecuting(true)
     setExecutionError(null)
     setExecutionResult(null)
@@ -1658,14 +2259,43 @@ function ChatMessage({ message }) {
       const suggestionIdString = message.id ? String(message.id) : null
       console.log('🔄 [Execute] Converting suggestion_id:', message.id, '→', suggestionIdString, typeof suggestionIdString)
 
+      // Apply time correction if original user message is available
+      let correctedActionSteps = message.action_steps
+      if (message.original_user_message) {
+        console.log('📝 [Execute] Original user message:', message.original_user_message)
+        correctedActionSteps = message.action_steps.map(step => {
+          if (step.action_type === 'calendar_update_event' || step.action_type === 'calendar_create_event') {
+            const correctedParams = { ...step.action_params }
+            if (correctedParams.start) {
+              const correctedStart = correctTimeInDatetime(correctedParams.start, message.original_user_message)
+              if (correctedStart !== correctedParams.start) {
+                console.log(`🔧 [Execute] Time correction applied: ${correctedParams.start} → ${correctedStart}`)
+                correctedParams.start = correctedStart
+              }
+            }
+            if (correctedParams.end) {
+              const correctedEnd = correctTimeInDatetime(correctedParams.end, message.original_user_message)
+              if (correctedEnd !== correctedParams.end) {
+                console.log(`🔧 [Execute] Time correction applied: ${correctedParams.end} → ${correctedEnd}`)
+                correctedParams.end = correctedEnd
+              }
+            }
+            return { ...step, action_params: correctedParams }
+          }
+          return step
+        })
+      } else {
+        console.log('⚠️ [Execute] No original user message available for time correction')
+      }
+
       const payload = {
-        action_steps: message.action_steps,
+        action_steps: correctedActionSteps,
         suggestion_id: suggestionIdString
       }
 
       console.log('🚀 [Execute] Preparing to execute actions')
       console.log('📦 [Execute] Full payload:', JSON.stringify(payload, null, 2))
-      console.log('📋 [Execute] Action steps:', message.action_steps)
+      console.log('📋 [Execute] Action steps:', correctedActionSteps)
 
       const authToken = await ipcRenderer.invoke('get-auth-token')
       if (!authToken) {
@@ -1827,38 +2457,86 @@ function ChatMessage({ message }) {
             )}
 
             {executionResult && (
-              <div className="mt-2 text-xs bg-green-500/10 border border-green-500/20 rounded px-3 py-2 space-y-2">
-                <div className="text-green-400 font-medium">
-                  ✓ Action completed: {executionResult.successful_actions} successful, {executionResult.failed_actions} failed
-                </div>
-                {executionResult.results && executionResult.results.map((result, idx) => (
-                  result.success && result.data && (
-                    <div key={idx} className="text-white/70 space-y-1">
-                      {result.data.title && (
-                        <div>📅 {result.data.title}</div>
-                      )}
-                      {result.data.start && (
-                        <div className="text-[11px] text-white/50">
-                          {new Date(result.data.start).toLocaleString()}
+              <div className="mt-3 text-xs bg-green-500/10 border border-green-500/20 rounded-lg overflow-hidden">
+                {executionResult.results && executionResult.results.map((result, idx) => {
+                  // Handle search results (multiple events)
+                  if (result.success && result.data && result.data.events) {
+                    return (
+                      <div key={idx} className="p-3 space-y-2">
+                        <div className="text-white/70 text-xs font-medium mb-2">
+                          🔍 Found {result.data.count} event{result.data.count !== 1 ? 's' : ''} matching "{result.data.query}"
                         </div>
-                      )}
-                      {result.data.html_link && (
-                        <a
-                          href={result.data.html_link}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 underline"
-                          onClick={(e) => {
-                            e.preventDefault()
-                            window.require('electron').shell.openExternal(result.data.html_link)
-                          }}
-                        >
-                          View in Google Calendar →
-                        </a>
-                      )}
-                    </div>
-                  )
-                ))}
+                        {result.data.events.map((event, eventIdx) => (
+                          <div key={eventIdx} className="ml-4 p-2 rounded border border-white/10 bg-white/5 space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm">📅</span>
+                              <span className="text-white/90 text-xs font-medium">{event.title}</span>
+                            </div>
+                            {event.start && (
+                              <div className="text-white/60 text-[11px] pl-5">
+                                {new Date(event.start).toLocaleString('en-US', {
+                                  weekday: 'short',
+                                  month: 'short',
+                                  day: 'numeric',
+                                  hour: 'numeric',
+                                  minute: '2-digit',
+                                  hour12: true
+                                })}
+                              </div>
+                            )}
+                            <div className="text-white/40 text-[10px] pl-5 font-mono">ID: {event.event_id.substring(0, 12)}...</div>
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  }
+
+                  // Handle single event results (create/update)
+                  if (result.success && result.data) {
+                    return (
+                      <div key={idx} className="p-3 space-y-2">
+                        {result.data.title && (
+                          <div className="flex items-center gap-2">
+                            <span className="text-base">📅</span>
+                            <span className="text-white/90 font-medium">{result.data.title}</span>
+                          </div>
+                        )}
+                        {result.data.start && (
+                          <div className="text-white/60 text-[11px] pl-6">
+                            {new Date(result.data.start).toLocaleString('en-US', {
+                              weekday: 'short',
+                              month: 'short',
+                              day: 'numeric',
+                              hour: 'numeric',
+                              minute: '2-digit',
+                              hour12: true
+                            })}
+                          </div>
+                        )}
+                        {result.data.html_link && (
+                          <a
+                            href={result.data.html_link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 text-blue-400 hover:text-blue-300 transition-colors pl-6 group"
+                            onClick={(e) => {
+                              e.preventDefault()
+                              window.require('electron').shell.openExternal(result.data.html_link)
+                            }}
+                          >
+                            <span className="text-xs">View in Google Calendar</span>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="group-hover:translate-x-0.5 transition-transform">
+                              <line x1="5" y1="12" x2="19" y2="12"></line>
+                              <polyline points="12 5 19 12 12 19"></polyline>
+                            </svg>
+                          </a>
+                        )}
+                      </div>
+                    )
+                  }
+
+                  return null
+                })}
               </div>
             )}
           </div>

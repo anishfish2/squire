@@ -27,6 +27,7 @@ class ActionExecutor:
 
             # Calendar actions
             "calendar_create_event": CalendarAgent,
+            "calendar_search_events": CalendarAgent,
             "calendar_update_event": CalendarAgent,
             "calendar_delete_event": CalendarAgent,
             "calendar_get_availability": CalendarAgent,

@@ -6,15 +6,24 @@ import traceback
 
 class PaddleOCRService:
     def __init__(self):
-        self.ocr = PaddleOCR(
-            device="cpu",
-            text_detection_model_name="PP-OCRv5_mobile_det",
-            text_recognition_model_name="en_PP-OCRv5_mobile_rec",
-            use_doc_orientation_classify=False,
-            use_doc_unwarping=False,
-            use_textline_orientation=False,
-            lang="en",
-        )
+        self.ocr = None  # Lazy initialization
+
+    def _ensure_ocr_initialized(self):
+        """Lazy initialize OCR only when needed"""
+        if self.ocr is None:
+            try:
+                self.ocr = PaddleOCR(
+                    device="cpu",
+                    text_detection_model_name="PP-OCRv5_mobile_det",
+                    text_recognition_model_name="en_PP-OCRv5_mobile_rec",
+                    use_doc_orientation_classify=False,
+                    use_doc_unwarping=False,
+                    use_textline_orientation=False,
+                    lang="en",
+                )
+            except Exception as e:
+                print(f"⚠️ Warning: Failed to initialize OCR service: {e}")
+                print("OCR functionality will be unavailable, but other features will work.")
 
     def _resize_image(self, image: Image.Image, max_side: int = 1280) -> Image.Image:
         w, h = image.size
@@ -50,6 +59,11 @@ class PaddleOCRService:
 
 
     def process_image(self, image_data: bytes) -> list[str]:
+        self._ensure_ocr_initialized()  # Initialize OCR if needed
+
+        if self.ocr is None:
+            raise RuntimeError("OCR service is not available")
+
         image = Image.open(io.BytesIO(image_data)).convert("RGB")
         img_array = np.array(image)
 

@@ -33,9 +33,17 @@ from app.models.schemas import (
 )
 
 router = APIRouter()
-ocr_service = PaddleOCRService()
+# Lazy initialization - don't create OCR service at module import time
+ocr_service = None
 keystroke_analysis_service = KeystrokeAnalysisService()
 ocr_job_manager = OCRJobManager(max_workers=4)
+
+def get_ocr_service():
+    """Lazy initialize OCR service only when needed"""
+    global ocr_service
+    if ocr_service is None:
+        ocr_service = PaddleOCRService()
+    return ocr_service
 
 
 # Define context analysis result classes

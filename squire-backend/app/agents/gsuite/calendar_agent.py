@@ -55,12 +55,24 @@ class CalendarAgent(BaseAgent):
             # Route to appropriate method
             if action_type == "calendar_create_event":
                 return await self.create_event(**params)
+            elif action_type == "calendar_search_events":
+                return await self.search_events(**params)
             elif action_type == "calendar_update_event":
                 return await self.update_event(**params)
             elif action_type == "calendar_delete_event":
                 return await self.delete_event(**params)
             elif action_type == "calendar_get_availability":
                 return await self.get_availability(**params)
+            elif action_type == "calendar_list_upcoming":
+                return await self.list_upcoming_events(**params)
+            elif action_type == "calendar_create_recurring":
+                return await self.create_recurring_event(**params)
+            elif action_type == "calendar_add_meet_link":
+                return await self.add_google_meet_link(**params)
+            elif action_type == "calendar_set_reminders":
+                return await self.set_reminders(**params)
+            elif action_type == "calendar_add_attendees":
+                return await self.add_attendees(**params)
             else:
                 return ActionResult(
                     success=False,
@@ -97,25 +109,34 @@ class CalendarAgent(BaseAgent):
             ActionResult with event data
         """
         try:
-            # Parse start time
+            # Parse start time and extract timezone
             start_dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
+
+            # Extract timezone from the datetime object
+            if start_dt.tzinfo is not None:
+                # Get timezone name (e.g., 'America/Los_Angeles' or use offset)
+                timezone_name = str(start_dt.tzinfo)
+                if timezone_name.startswith('UTC'):
+                    # If it's a UTC offset like UTC-08:00, extract it
+                    timezone_name = 'Etc/GMT' + timezone_name[3:]  # Convert UTC-08:00 to Etc/GMT+8 (note: reversed!)
+            else:
+                # No timezone info, use UTC as fallback
+                timezone_name = 'UTC'
 
             # If no end time, default to 1 hour after start
             if not end:
                 end_dt = start_dt + timedelta(hours=1)
                 end = end_dt.isoformat()
 
-            # Build event body
+            # Build event body - use the datetime strings as-is, Google will parse the timezone
             event = {
                 'summary': title,
                 'description': description,
                 'start': {
                     'dateTime': start,
-                    'timeZone': 'UTC',
                 },
                 'end': {
                     'dateTime': end,
-                    'timeZone': 'UTC',
                 },
             }
 
@@ -158,6 +179,96 @@ class CalendarAgent(BaseAgent):
             self.log(f"Error creating event: {e}", "error")
             return ActionResult(success=False, error=str(e))
 
+    async def search_events(
+        self,
+        query: str,
+        start_date: str = None,
+        end_date: str = None,
+        max_results: int = 10,
+        calendar_id: str = "primary"
+    ) -> ActionResult:
+        """
+        Search for calendar events by title and date range
+
+        Args:
+            query: Search query to match against event titles
+            start_date: Start of date range (ISO 8601). Defaults to now.
+            end_date: End of date range (ISO 8601). Defaults to 7 days from start.
+            max_results: Maximum number of results (default: 10)
+            calendar_id: Calendar ID (default: 'primary')
+
+        Returns:
+            ActionResult with list of matching events
+        """
+        try:
+            # Default to searching from now
+            if not start_date:
+                start_dt = datetime.now()
+                start_date = start_dt.isoformat() + 'Z'
+
+            # Default to 7 days from start
+            if not end_date:
+                start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+                end_dt = start_dt + timedelta(days=7)
+                end_date = end_dt.isoformat().replace('+00:00', 'Z')
+
+            # Search for events
+            events_result = self.service.events().list(
+                calendarId=calendar_id,
+                timeMin=start_date,
+                timeMax=end_date,
+                maxResults=max_results,
+                singleEvents=True,
+                orderBy='startTime',
+                q=query  # Google Calendar API supports text search
+            ).execute()
+
+            events = events_result.get('items', [])
+
+            # Format results
+            formatted_events = []
+            print(f"\n🔍 [TIMEZONE DEBUG] search_events results for query '{query}':")
+            for idx, event in enumerate(events):
+                event_start = event.get('start', {}).get('dateTime') or event.get('start', {}).get('date')
+                event_end = event.get('end', {}).get('dateTime') or event.get('end', {}).get('date')
+
+                print(f"   Event {idx + 1}: \"{event.get('summary')}\"")
+                print(f"      Start: {event_start} ← Google Calendar returned this")
+                print(f"      End: {event_end} ← Google Calendar returned this")
+                print(f"      Event ID: {event.get('id')}")
+
+                formatted_events.append({
+                    "event_id": event.get('id'),
+                    "title": event.get('summary'),
+                    "start": event_start,
+                    "end": event_end,
+                    "description": event.get('description', ''),
+                    "location": event.get('location', ''),
+                    "html_link": event.get('htmlLink')
+                })
+            print()
+
+            self.log(f"Found {len(formatted_events)} events matching '{query}'")
+
+            return ActionResult(
+                success=True,
+                data={
+                    "events": formatted_events,
+                    "count": len(formatted_events),
+                    "query": query
+                }
+            )
+
+        except HttpError as e:
+            self.log(f"Google API error: {e}", "error")
+            return ActionResult(
+                success=False,
+                error=f"Google Calendar API error: {e}"
+            )
+        except Exception as e:
+            self.log(f"Error searching events: {e}", "error")
+            return ActionResult(success=False, error=str(e))
+
     async def update_event(
         self,
         event_id: str,
@@ -176,6 +287,13 @@ class CalendarAgent(BaseAgent):
                 eventId=event_id
             ).execute()
 
+            print(f"\n🔍 [TIMEZONE DEBUG] update_event called:")
+            print(f"   Event ID: {event_id}")
+            print(f"   Current event start: {event.get('start', {}).get('dateTime', 'N/A')} ← Current time in Google Calendar")
+            print(f"   Current event end: {event.get('end', {}).get('dateTime', 'N/A')} ← Current time in Google Calendar")
+            print(f"   New start parameter: {start} ← What we want to change it to")
+            print(f"   New end parameter: {end} ← What we want to change it to")
+
             # Update fields
             if title:
                 event['summary'] = title
@@ -184,9 +302,13 @@ class CalendarAgent(BaseAgent):
             if location:
                 event['location'] = location
             if start:
-                event['start'] = {'dateTime': start, 'timeZone': 'UTC'}
+                # Don't override timezone - let Google Calendar parse it from the ISO string
+                event['start'] = {'dateTime': start}
+                print(f"   Setting start to: {start} ← Sending this to Google Calendar")
             if end:
-                event['end'] = {'dateTime': end, 'timeZone': 'UTC'}
+                # Don't override timezone - let Google Calendar parse it from the ISO string
+                event['end'] = {'dateTime': end}
+                print(f"   Setting end to: {end} ← Sending this to Google Calendar")
 
             # Update event
             updated_event = self.service.events().update(
@@ -197,13 +319,21 @@ class CalendarAgent(BaseAgent):
 
             self.log(f"Updated calendar event: {event_id}")
 
+            result_start = updated_event.get('start', {}).get('dateTime')
+            result_end = updated_event.get('end', {}).get('dateTime')
+
+            print(f"   ✅ Updated event successfully!")
+            print(f"   Result start from Google: {result_start} ← What Google Calendar returned")
+            print(f"   Result end from Google: {result_end} ← What Google Calendar returned\n")
+
             return ActionResult(
                 success=True,
                 data={
                     "event_id": updated_event.get('id'),
                     "title": updated_event.get('summary'),
-                    "start": updated_event.get('start', {}).get('dateTime'),
-                    "end": updated_event.get('end', {}).get('dateTime')
+                    "start": result_start,
+                    "end": result_end,
+                    "html_link": updated_event.get('htmlLink')
                 }
             )
 
