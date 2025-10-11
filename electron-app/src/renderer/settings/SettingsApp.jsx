@@ -11,11 +11,37 @@ function SettingsApp() {
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [preferencesLoaded, setPreferencesLoaded] = useState(false)
   const [user, setUser] = useState(null)
+  const [googleConnected, setGoogleConnected] = useState(false)
+
+  // Check Google connection status
+  const checkGoogleConnection = async () => {
+    try {
+      const token = await ipcRenderer.invoke('get-auth-token')
+      if (!token) return
+
+      const response = await fetch('http://127.0.0.1:8000/api/auth/google/status', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setGoogleConnected(data.connected && data.has_calendar && data.has_gmail)
+      }
+    } catch (error) {
+      console.error('Failed to check Google connection:', error)
+    }
+  }
 
   // Load initial data
   useEffect(() => {
     // Request app preferences
     ipcRenderer.send('load-app-preferences')
+
+    // Check Google connection status
+    checkGoogleConnection()
 
     // IPC listeners
     const handleDetectedApps = (event, apps) => {
@@ -107,6 +133,54 @@ function SettingsApp() {
   const handleLogout = () => {
     if (confirm('Are you sure you want to log out?')) {
       ipcRenderer.send('auth-signout')
+    }
+  }
+
+  const handleConnectGoogle = async () => {
+    try {
+      // Get access token from IPC
+      const token = await ipcRenderer.invoke('get-auth-token')
+      console.log('🔑 Got token from IPC:', token ? `${token.substring(0, 20)}...` : 'null')
+
+      if (!token) {
+        alert('Not logged in. Please log in first.')
+        return
+      }
+
+      // Request Google OAuth URL from backend
+      console.log('📤 Sending request to /api/auth/google/connect')
+      const response = await fetch('http://127.0.0.1:8000/api/auth/google/connect', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      })
+
+      console.log('📥 Response status:', response.status)
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${await response.text()}`)
+      }
+
+      const data = await response.json()
+
+      if (data.url) {
+        // Open OAuth window
+        const { shell } = window.require('electron')
+        shell.openExternal(data.url)
+
+        // Show notification
+        alert('Opening Google consent screen in browser...\nGrant permissions for Calendar and Gmail\n\nAfter completing the flow, this will update automatically.')
+
+        // Poll for connection status after OAuth
+        setTimeout(() => checkGoogleConnection(), 3000)
+        setTimeout(() => checkGoogleConnection(), 6000)
+        setTimeout(() => checkGoogleConnection(), 10000)
+      }
+    } catch (error) {
+      console.error('Failed to connect Google:', error)
+      alert(`Failed to connect Google services: ${error.message}`)
     }
   }
 
@@ -205,20 +279,59 @@ function SettingsApp() {
       {/* Main Content */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden px-12 py-6 custom-scrollbar max-w-4xl mx-auto w-full">
         {/* User Profile Section */}
-        {user && (
-          <div className="mb-5 bg-white/5 rounded-xl p-5 border border-white/10">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-white font-semibold text-sm m-0">
-                  {user.user_metadata?.name || user.email}
-                </h3>
-                <p className="text-white/60 text-xs m-0 mt-1">{user.email}</p>
+        {user ? (
+          <>
+            <div className="mb-5 bg-white/5 rounded-xl p-5 border border-white/10">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-white font-semibold text-sm m-0">
+                    {user.user_metadata?.name || user.email}
+                  </h3>
+                  <p className="text-white/60 text-xs m-0 mt-1">{user.email}</p>
+                </div>
+                <button
+                  onClick={handleLogout}
+                  className="[-webkit-app-region:no-drag] px-4 py-2 text-sm text-red-400 hover:bg-red-500/10 rounded-lg transition-all cursor-pointer border border-red-500/20 hover:border-red-500/40"
+                >
+                  Log Out
+                </button>
               </div>
+            </div>
+
+            {/* Google Services Connection */}
+            <div className="mb-5 bg-white/5 rounded-xl p-5 border border-white/10">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-white font-semibold text-sm m-0 flex items-center gap-2">
+                    📅 Google Calendar & Gmail
+                  </h3>
+                  <p className="text-white/60 text-xs m-0 mt-1">
+                    {googleConnected ? 'Connected - Calendar and Gmail actions enabled' : 'Connect to enable calendar events and email drafts'}
+                  </p>
+                </div>
+                <button
+                  onClick={handleConnectGoogle}
+                  className={`[-webkit-app-region:no-drag] px-4 py-2 text-sm text-white rounded-lg transition-all cursor-pointer ${
+                    googleConnected
+                      ? 'bg-green-600 hover:bg-green-700'
+                      : 'bg-blue-500 hover:bg-blue-600'
+                  }`}
+                >
+                  {googleConnected ? '✓ Connected' : 'Connect Google'}
+                </button>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="mb-5 bg-white/5 rounded-xl p-5 border border-white/10">
+            <div className="text-center py-4">
+              <h3 className="text-white font-semibold text-sm m-0 mb-2">Not Logged In</h3>
+              <p className="text-white/60 text-xs mb-4">Please log in to use Squire</p>
               <button
-                onClick={handleLogout}
-                className="[-webkit-app-region:no-drag] px-4 py-2 text-sm text-red-400 hover:bg-red-500/10 rounded-lg transition-all cursor-pointer border border-red-500/20 hover:border-red-500/40"
+                onClick={() => ipcRenderer.send('show-login')}
+                className="[-webkit-app-region:no-drag] px-6 py-2 text-sm bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-all cursor-pointer"
               >
-                Log Out
+                Log In
               </button>
             </div>
           </div>

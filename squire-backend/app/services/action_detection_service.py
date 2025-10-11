@@ -18,15 +18,15 @@ class ActionDetectionService:
         self.patterns = {
             "meeting": [
                 # Match: "meeting with John at 2pm", "meet with Sarah tomorrow at 3pm"
-                r"meeting\s+(?:with\s+)?([^0-9]+?)\s+(?:at|@)\s+([0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm)?)",
-                r"meet\s+(?:with\s+)?([^0-9]+?)\s+(?:at|@)\s+([0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm)?)",
+                r"meeting\s+(?:with\s+)?(.+?)\s+(?:at|@)\s+([0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm)?)",
+                r"meet\s+(?:with\s+)?(.+?)\s+(?:at|@)\s+([0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm)?)",
                 # Match: "call with Soniya tomorrow at 2 PM", "call Soniya at 2pm"
-                r"call\s+(?:with\s+)?([^0-9]+?)\s+(?:tomorrow|today|next\s+\w+)?\s*(?:at|@)\s+([0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm)?)",
-                r"call\s+(?:with\s+)?([^0-9]+?)\s+(?:at|@)\s+([0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm)?)",
-                # Match: "schedule a/the call with John tomorrow at 2 PM"
-                r"schedule\s+(?:a|the)?\s*(?:call|meeting)\s+(?:with\s+)?([^0-9]+?)\s+(?:tomorrow|today|next\s+\w+)?\s*(?:at|@)\s+([0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm)?)",
+                r"call\s+(?:with\s+)?(.+?)\s+(?:tomorrow|today|next\s+\w+)?\s*(?:at|@)\s+([0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm)?)",
+                r"call\s+(?:with\s+)?(.+?)\s+(?:at|@)\s+([0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm)?)",
+                # Match: "schedule a/the call/meeting with John tomorrow at 2 PM"
+                r"schedule\s+(?:a|the)?\s*(?:call|meeting)\s+(?:with\s+)?(.+?)\s+(?:tomorrow|today|next\s+\w+)?\s*(?:at|@)\s+([0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm)?)",
                 # Match: "set up meeting with Sarah at 3pm tomorrow"
-                r"set\s+up\s+(?:a|the)?\s*(?:call|meeting)\s+(?:with\s+)?([^0-9]+?)\s+(?:at|@)\s+([0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm)?)"
+                r"set\s+up\s+(?:a|the)?\s*(?:call|meeting)\s+(?:with\s+)?(.+?)\s+(?:at|@)\s+([0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm)?)"
             ],
             "email_reply": [
                 r"reply\s+to\s+(?:this\s+)?email",

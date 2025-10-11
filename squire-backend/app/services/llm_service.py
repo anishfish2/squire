@@ -37,7 +37,7 @@ class OpenAIProvider(LLMProvider):
         messages: List[Dict[str, str]],
         model: str,
         **kwargs
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[Dict[str, Any], None]:
         """Stream chat completion from OpenAI."""
         try:
             stream = await self.client.chat.completions.create(
@@ -47,9 +47,31 @@ class OpenAIProvider(LLMProvider):
                 **kwargs
             )
 
+            chunk_count = 0
             async for chunk in stream:
-                if chunk.choices[0].delta.content:
-                    yield chunk.choices[0].delta.content
+                chunk_count += 1
+                delta = chunk.choices[0].delta
+
+                # Debug: Log what we receive
+                print(f"📦 OpenAI chunk {chunk_count}: content={bool(delta.content)}, tool_calls={bool(hasattr(delta, 'tool_calls') and delta.tool_calls)}", flush=True)
+
+                # Yield text content
+                if delta.content:
+                    print(f"   💬 Content: {delta.content[:50]}", flush=True)
+                    yield {"content": delta.content}
+
+                # Yield function/tool calls
+                if hasattr(delta, 'tool_calls') and delta.tool_calls:
+                    for tool_call in delta.tool_calls:
+                        tool_call_data = {
+                            "id": tool_call.id if tool_call.id else None,
+                            "name": tool_call.function.name if hasattr(tool_call.function, 'name') else None,
+                            "arguments": tool_call.function.arguments if hasattr(tool_call.function, 'arguments') else None
+                        }
+                        print(f"🔧 OpenAI tool_call chunk: id={tool_call_data['id']}, name={tool_call_data['name']}, args={repr(tool_call_data['arguments'][:100] if tool_call_data['arguments'] else 'EMPTY')}", flush=True)
+                        yield {"tool_call": tool_call_data}
+
+            print(f"✅ OpenAI stream completed after {chunk_count} chunks", flush=True)
 
         except Exception as e:
             logger.error(f"OpenAI streaming error: {e}")
@@ -193,14 +215,20 @@ class LLMService:
             **kwargs: Additional parameters for the provider
 
         Yields:
-            Dict with 'content' key containing the streamed text chunks
+            Dict with 'content' or 'tool_call' keys containing the streamed data
         """
         try:
             provider, provider_name = self._get_provider(model)
             logger.info(f"Streaming chat with {provider_name} model {model}")
 
             async for chunk in provider.stream_chat(messages, model, **kwargs):
-                yield {'content': chunk}
+                # OpenAI provider yields structured dicts, Anthropic yields strings
+                if isinstance(chunk, dict):
+                    # Pass through structured data from OpenAI (content and tool calls)
+                    yield chunk
+                else:
+                    # Wrap string data from Anthropic/Google
+                    yield {'content': chunk}
 
             # Signal completion
             yield {'done': True}

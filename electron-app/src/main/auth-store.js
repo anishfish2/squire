@@ -15,6 +15,7 @@ class AuthStore {
     this.currentUser = null
     this.accessToken = null
     this.refreshToken = null
+    this.refreshInterval = null  // Periodic token refresh
 
     // Load existing data
     this.loadStore()
@@ -35,13 +36,15 @@ class AuthStore {
         // Don't decrypt tokens here - let getAccessToken() and getRefreshToken() do it lazily
         // This avoids issues with safeStorage not being ready yet
 
-        // Schedule token refresh check after app is ready
-        // This ensures tokens are fresh on startup
+        // Schedule initial token refresh check after app is ready
         setTimeout(() => {
           this.checkAndRefreshToken().catch(err => {
             console.error('❌ [AuthStore] Failed to refresh token on startup:', err)
           })
         }, 1000)
+
+        // Start periodic token refresh (every 4 minutes)
+        this.startPeriodicRefresh()
       }
     } catch (error) {
       console.error('Failed to load auth store:', error)
@@ -54,7 +57,10 @@ class AuthStore {
    */
   async checkAndRefreshToken() {
     const token = this.getAccessToken()
-    if (!token) return
+    if (!token) {
+      console.log('⚠️ [AuthStore] No token to check')
+      return
+    }
 
     try {
       // Try to decode the token to check expiration
@@ -66,19 +72,56 @@ class AuthStore {
         const now = Date.now()
         const timeUntilExpiry = expiresAt - now
 
+        console.log(`🔍 [AuthStore] Token expires in ${Math.round(timeUntilExpiry / 1000)}s`)
+
         // Refresh if token expires in less than 5 minutes or is already expired
         if (timeUntilExpiry < 5 * 60 * 1000) {
+          console.log('🔄 [AuthStore] Token expiring soon, refreshing...')
           await this.refreshAccessToken()
+          console.log('✅ [AuthStore] Token refreshed successfully')
         }
       }
     } catch (error) {
       console.error('❌ [AuthStore] Error checking token expiry:', error)
       // If we can't decode the token, try to refresh it anyway
       try {
+        console.log('🔄 [AuthStore] Attempting token refresh anyway...')
         await this.refreshAccessToken()
+        console.log('✅ [AuthStore] Token refreshed successfully')
       } catch (refreshError) {
         console.error('❌ [AuthStore] Token refresh failed:', refreshError)
       }
+    }
+  }
+
+  /**
+   * Start periodic token refresh (every 4 minutes)
+   */
+  startPeriodicRefresh() {
+    // Clear any existing interval
+    if (this.refreshInterval) {
+      clearInterval(this.refreshInterval)
+    }
+
+    // Check token every 4 minutes
+    this.refreshInterval = setInterval(() => {
+      console.log('⏰ [AuthStore] Periodic token check...')
+      this.checkAndRefreshToken().catch(err => {
+        console.error('❌ [AuthStore] Periodic refresh failed:', err)
+      })
+    }, 4 * 60 * 1000) // 4 minutes
+
+    console.log('✅ [AuthStore] Started periodic token refresh (every 4 minutes)')
+  }
+
+  /**
+   * Stop periodic token refresh
+   */
+  stopPeriodicRefresh() {
+    if (this.refreshInterval) {
+      clearInterval(this.refreshInterval)
+      this.refreshInterval = null
+      console.log('🛑 [AuthStore] Stopped periodic token refresh')
     }
   }
 
@@ -127,6 +170,9 @@ class AuthStore {
       this.accessToken = accessToken
       this.refreshToken = refreshToken
       this.currentUser = user
+
+      // Start periodic refresh for new tokens
+      this.startPeriodicRefresh()
 
       console.log('✅ Tokens saved securely')
       return true
@@ -228,6 +274,9 @@ class AuthStore {
     this.accessToken = null
     this.refreshToken = null
     this.currentUser = null
+
+    // Stop periodic refresh on logout
+    this.stopPeriodicRefresh()
 
     console.log('✅ Auth data cleared')
   }

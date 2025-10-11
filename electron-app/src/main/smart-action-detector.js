@@ -36,9 +36,9 @@ class SmartActionDetector {
       typingSessionStart: 0
     }
 
-    // Debounce settings
-    this.TYPING_PAUSE_THRESHOLD = 1500 // 1.5 seconds after typing stops
-    this.MIN_KEYSTROKES = 15 // Minimum keystrokes before triggering
+    // Debounce settings (reduced for faster action detection)
+    this.TYPING_PAUSE_THRESHOLD = 700 // 0.7 seconds after typing stops (was 1500)
+    this.MIN_KEYSTROKES = 8 // Minimum keystrokes before triggering (was 15)
 
     // Action detection keywords (trigger immediate analysis)
     this.actionKeywords = [
@@ -185,13 +185,35 @@ class SmartActionDetector {
         session_id: this.aiAssistant?.sessionId
       }
 
-      console.log(`📸 [SmartActionDetector] Capturing OCR for action detection...`)
+      console.log(`📸 [SmartActionDetector] Capturing focused region for action detection...`)
 
-      // Capture OCR immediately
-      const ocrText = await this.ocrManager.captureAndRecognize(
+      // Capture focused region around user's activity (much faster than full screen)
+      const { imgBuffer, region } = await this.ocrManager.captureFocusedRegion(
+        null,  // Auto-detect region from mouse position
         appContext,
         this.aiAssistant?.userId
       )
+
+      if (!imgBuffer) {
+        console.log(`   ⚠️ Failed to capture focused region`)
+        return
+      }
+
+      // Queue OCR job for focused region
+      const jobId = await this.ocrManager.queueOCRJob(imgBuffer, {
+        ...appContext,
+        capture_type: 'focused_typing',
+        region: region
+      }, this.aiAssistant?.userId)
+
+      if (!jobId) {
+        console.log(`   ⚠️ Failed to queue OCR job`)
+        return
+      }
+
+      // Wait for OCR completion (with shorter timeout for focused region)
+      const result = await this.ocrManager.waitForJobCompletionWebSocket(jobId, 5000)
+      const ocrText = result.text_lines || []
 
       if (!ocrText || ocrText.length === 0) {
         console.log(`   ⚠️ No OCR text captured`)

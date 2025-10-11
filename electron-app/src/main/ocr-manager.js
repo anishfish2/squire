@@ -2,6 +2,7 @@ import screenshot from 'screenshot-desktop'
 import FormData from 'form-data'
 import WebSocketManager from './websocket-manager.js'
 import authStore from './auth-store.js'
+import { desktopCapturer, screen } from 'electron'
 
 class OCRManager {
   constructor(overlayWindow = null) {
@@ -12,7 +13,10 @@ class OCRManager {
     this.lastOCRContent = [];
     this.lastOCRTimestamp = 0;
     this.contentSimilarityThreshold = 0.8;
-    this.minTimeBetweenOCR = 2000;
+    this.minTimeBetweenOCR = 500;  // Reduced from 2000 for faster captures
+
+    // Activity tracker reference for mouse position
+    this.activityTracker = null;
 
     this.wsManager = new WebSocketManager();
     this.pendingJobs = new Map();
@@ -25,6 +29,119 @@ class OCRManager {
 
   setVisionScheduler(visionScheduler) {
     this.visionScheduler = visionScheduler;
+  }
+
+  setActivityTracker(activityTracker) {
+    this.activityTracker = activityTracker;
+  }
+
+  /**
+   * Capture a focused region of the screen around mouse or specified coordinates
+   * Much faster than full screen capture
+   */
+  async captureFocusedRegion(region = null, appContext = {}, userId = null) {
+    if (this.isProcessing) {
+      console.log('🔍 [OCRManager] Already processing, skipping focused capture');
+      return { imgBuffer: null, region: null };
+    }
+
+    // Check if vision is globally enabled
+    if (this.visionScheduler && !this.visionScheduler.globalVisionEnabled) {
+      console.log('🚫 [OCRManager] Vision pipeline disabled, skipping focused capture');
+      return { imgBuffer: null, region: null };
+    }
+
+    this.isProcessing = true;
+    let wasVisible = false;
+
+    try {
+      // Hide overlay if visible
+      if (this.overlayWindow && this.overlayWindow.isVisible()) {
+        wasVisible = true;
+        this.overlayWindow.hide();
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+
+      // Determine capture region
+      let captureRegion = region;
+      if (!captureRegion && this.activityTracker) {
+        const mousePos = this.activityTracker.lastMousePosition || { x: 960, y: 540 };
+        captureRegion = {
+          x: Math.max(0, mousePos.x - 400),
+          y: Math.max(0, mousePos.y - 300),
+          width: 800,
+          height: 600
+        };
+        console.log(`🎯 [OCRManager] Capturing focused region around mouse (${mousePos.x}, ${mousePos.y})`);
+      } else if (!captureRegion) {
+        // Default center region if no mouse tracking
+        captureRegion = { x: 560, y: 240, width: 800, height: 600 };
+      }
+
+      // Get primary display dimensions
+      const primaryDisplay = screen.getPrimaryDisplay();
+      const { width: screenWidth, height: screenHeight } = primaryDisplay.size;
+
+      // Ensure region is within screen bounds
+      captureRegion.x = Math.max(0, Math.min(captureRegion.x, screenWidth - captureRegion.width));
+      captureRegion.y = Math.max(0, Math.min(captureRegion.y, screenHeight - captureRegion.height));
+
+      // Capture full screen first (desktopCapturer doesn't support region directly)
+      const sources = await desktopCapturer.getSources({
+        types: ['screen'],
+        thumbnailSize: { width: screenWidth, height: screenHeight }
+      });
+
+      if (sources.length === 0) {
+        console.error('❌ [OCRManager] No screen sources available');
+        return { imgBuffer: null, region: null };
+      }
+
+      const screenshot = sources[0].thumbnail;
+
+      // Crop to focused region
+      const croppedImage = screenshot.crop(captureRegion);
+      const imgBuffer = croppedImage.toPNG();
+
+      console.log(`✅ [OCRManager] Captured ${captureRegion.width}x${captureRegion.height} region (${imgBuffer.length} bytes)`);
+
+      // Restore overlay
+      if (wasVisible && this.overlayWindow) {
+        this.overlayWindow.showInactive();
+      }
+
+      return { imgBuffer, region: captureRegion };
+
+    } catch (error) {
+      console.error('❌ [OCRManager] Error capturing focused region:', error);
+
+      if (wasVisible && this.overlayWindow && !this.overlayWindow.isVisible()) {
+        this.overlayWindow.showInactive();
+      }
+
+      return { imgBuffer: null, region: null };
+    } finally {
+      this.isProcessing = false;
+    }
+  }
+
+  /**
+   * Capture focused region and queue for OCR + Vision analysis
+   * Returns job ID immediately for async processing
+   */
+  async captureFocusedAndQueue(region = null, appContext = {}, userId = null) {
+    const { imgBuffer, region: capturedRegion } = await this.captureFocusedRegion(region, appContext, userId);
+
+    if (!imgBuffer) return null;
+
+    // Queue for OCR processing
+    const jobId = await this.queueOCRJob(imgBuffer, {
+      ...appContext,
+      capture_type: 'focused',
+      region: capturedRegion
+    }, userId);
+
+    return jobId;
   }
 
   _setupWebSocketHandlers() {
@@ -63,13 +180,14 @@ class OCRManager {
     }
 
     // Check if vision is globally enabled
-    if (this.visionScheduler) {
-      if (!this.visionScheduler.globalVisionEnabled) {
-        console.log('🚫 [OCRManager] Vision pipeline disabled, skipping OCR capture');
-        return [];
-      }
-    } else {
-      console.warn('⚠️ [OCRManager] visionScheduler not set, allowing OCR to proceed');
+    if (!this.visionScheduler) {
+      console.log('🚫 [OCRManager] visionScheduler not initialized, skipping OCR capture');
+      return [];
+    }
+
+    if (!this.visionScheduler.globalVisionEnabled) {
+      console.log('🚫 [OCRManager] Vision pipeline disabled, skipping OCR capture');
+      return [];
     }
 
     this.isProcessing = true;
@@ -129,13 +247,14 @@ class OCRManager {
     }
 
     // Check if vision is globally enabled
-    if (this.visionScheduler) {
-      if (!this.visionScheduler.globalVisionEnabled) {
-        console.log('🚫 [OCRManager] Vision pipeline disabled, skipping OCR queue');
-        return null;
-      }
-    } else {
-      console.warn('⚠️ [OCRManager] visionScheduler not set, allowing OCR queue to proceed');
+    if (!this.visionScheduler) {
+      console.log('🚫 [OCRManager] visionScheduler not initialized, skipping OCR queue');
+      return null;
+    }
+
+    if (!this.visionScheduler.globalVisionEnabled) {
+      console.log('🚫 [OCRManager] Vision pipeline disabled, skipping OCR queue');
+      return null;
     }
 
     this.isProcessing = true;

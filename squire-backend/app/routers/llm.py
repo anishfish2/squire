@@ -2,7 +2,7 @@
 LLM Router for handling chat API endpoints.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
@@ -10,6 +10,8 @@ import json
 import logging
 
 from app.services.llm_service import llm_service
+from app.services.action_detection_service import action_detection_service
+from app.middleware.auth import get_current_user, jwt_bearer
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +33,73 @@ class ChatRequest(BaseModel):
     max_tokens: Optional[int] = None
 
 
+# Tool definitions for GPT-4
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "calendar_create_event",
+            "description": "Create a calendar event on the user's Google Calendar",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "The title/summary of the event"
+                    },
+                    "start": {
+                        "type": "string",
+                        "description": "Start time in ISO 8601 format (e.g., 2025-10-11T14:00:00Z)"
+                    },
+                    "end": {
+                        "type": "string",
+                        "description": "End time in ISO 8601 format (optional, defaults to 1 hour after start)"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Event description/notes"
+                    },
+                    "location": {
+                        "type": "string",
+                        "description": "Event location"
+                    }
+                },
+                "required": ["title", "start"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "gmail_create_draft",
+            "description": "Create an email draft in Gmail",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "to": {
+                        "type": "string",
+                        "description": "Recipient email address"
+                    },
+                    "subject": {
+                        "type": "string",
+                        "description": "Email subject"
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "Email body content"
+                    }
+                },
+                "required": ["to", "subject", "body"]
+            }
+        }
+    }
+]
+
+
 async def generate_stream(request: ChatRequest):
     """Generate Server-Sent Events stream for chat completion."""
     try:
+        print(f"🚀 [LLM] Starting stream for model: {request.model}")
         logger.info(f"🚀 Starting stream for model: {request.model}")
 
         # Convert Pydantic models to dicts
@@ -46,8 +112,16 @@ async def generate_stream(request: ChatRequest):
         if request.max_tokens is not None:
             kwargs['max_tokens'] = request.max_tokens
 
+        # Add tools for GPT models (OpenAI function calling)
+        if 'gpt' in request.model.lower():
+            kwargs['tools'] = TOOLS
+            kwargs['tool_choice'] = 'auto'
+
         # Stream the response
         chunk_count = 0
+        tool_calls_buffer = {}  # Buffer for accumulating tool call arguments
+        last_tool_id = None  # Track the last tool ID for chunks without IDs
+
         async for chunk in llm_service.stream_chat_completion(
             messages=messages,
             model=request.model,
@@ -59,14 +133,54 @@ async def generate_stream(request: ChatRequest):
                 yield f"data: {json.dumps({'error': chunk['error']})}\n\n"
                 break
             elif 'done' in chunk:
+                # Send any complete tool calls before completion
+                if tool_calls_buffer:
+                    print(f"📤 [Router] Sending {len(tool_calls_buffer)} buffered tool calls", flush=True)
+                    for tool_id, tool_data in tool_calls_buffer.items():
+                        print(f"   Tool call {tool_id}: {tool_data['name']}, args_len={len(tool_data['arguments'])}", flush=True)
+                        print(f"   Arguments: {tool_data['arguments'][:200]}...", flush=True)  # Log first 200 chars
+                        yield f"data: {json.dumps({'tool_call': tool_data})}\n\n"
+                else:
+                    print(f"⚠️ [Router] No tool calls buffered at completion!", flush=True)
+
                 # Send completion event
-                logger.info(f"✅ Stream completed. Total chunks: {chunk_count}")
+                print(f"✅ [Router] Stream completed. Total chunks: {chunk_count}", flush=True)
                 yield f"data: [DONE]\n\n"
                 break
             elif 'content' in chunk:
                 # Send content chunk
                 chunk_count += 1
                 yield f"data: {json.dumps({'content': chunk['content']})}\n\n"
+            elif 'tool_call' in chunk:
+                # Accumulate tool call data (DO NOT yield yet - buffer first!)
+                tool_call = chunk['tool_call']
+                tool_id = tool_call.get('id')
+
+                # If no ID in this chunk, use the last known tool ID
+                # (OpenAI sends ID only in first chunk, then None for argument chunks)
+                if not tool_id and last_tool_id:
+                    tool_id = last_tool_id
+                    print(f"   🔄 [Router] Using last_tool_id: {tool_id}", flush=True)
+
+                if tool_id:
+                    # Create buffer if this is a new tool call
+                    if tool_id not in tool_calls_buffer:
+                        tool_calls_buffer[tool_id] = {
+                            'id': tool_id,
+                            'name': tool_call.get('name', ''),
+                            'arguments': ''
+                        }
+                        last_tool_id = tool_id  # Remember this ID
+                        print(f"🔧 [Router] Created tool call buffer: {tool_id} - {tool_call.get('name', '')}", flush=True)
+
+                    # Accumulate arguments from this chunk
+                    if tool_call.get('arguments'):
+                        tool_calls_buffer[tool_id]['arguments'] += tool_call['arguments']
+                        print(f"   📝 [Router] Accumulated args for {tool_id}, total length: {len(tool_calls_buffer[tool_id]['arguments'])}", flush=True)
+
+                    # Update name if provided in this chunk
+                    if tool_call.get('name') and not tool_calls_buffer[tool_id]['name']:
+                        tool_calls_buffer[tool_id]['name'] = tool_call.get('name')
 
     except Exception as e:
         logger.error(f"❌ Error in generate_stream: {e}", exc_info=True)
@@ -176,3 +290,74 @@ async def list_models():
             pass
 
     return {"models": available_models}
+
+
+class DetectActionsRequest(BaseModel):
+    """Request to detect actions from a message."""
+    message: str
+    context: Optional[Dict[str, Any]] = None
+
+
+@router.post("/detect-actions", dependencies=[Depends(jwt_bearer)])
+async def detect_actions(
+    request: DetectActionsRequest,
+    current_user: Dict = Depends(get_current_user)
+):
+    """
+    Detect executable actions from a user message.
+
+    This endpoint analyzes a message and returns action steps if it contains
+    actionable content (e.g., "schedule meeting tomorrow at 2pm").
+
+    Args:
+        request: Message and optional context
+        current_user: Authenticated user
+
+    Returns:
+        Dict with detected actions or regular response
+    """
+    try:
+        user_id = current_user["id"]
+
+        # Use action detection service to analyze the message
+        # Format it in the same way as vision analysis context
+        context_data = {
+            "ocr_text": [request.message],  # Put message in ocr_text array
+            "meaningful_context": request.message,  # Also in meaningful_context
+            "app_name": request.context.get("app_name", "LLM Chat") if request.context else "LLM Chat",
+            "window_title": request.context.get("window_title", "") if request.context else "",
+            "user_id": user_id
+        }
+
+        logger.info(f"🔍 Detecting actions from message: {request.message[:50]}...")
+
+        # Detect actions using analyze_context
+        result = action_detection_service.analyze_context(context_data)
+
+        if result and result.get("execution_mode") == "direct":
+            # Format as executable suggestion
+            action_steps = result.get("action_steps", [])
+            logger.info(f"✅ Detected {len(action_steps)} action(s)")
+            return {
+                "has_actions": True,
+                "execution_mode": "direct",
+                "action_steps": action_steps,
+                "message": result.get("content", {}).get("summary", "I can help you with that. Click Execute to perform the action."),
+                "type": "action_suggestion"
+            }
+        else:
+            # No actions detected
+            logger.info("ℹ️ No actions detected")
+            return {
+                "has_actions": False,
+                "message": "I don't detect any executable actions in your message. Try asking me to schedule a meeting, send an email, or create a calendar event."
+            }
+
+    except Exception as e:
+        logger.error(f"❌ Error detecting actions: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to detect actions: {str(e)}"
+        )

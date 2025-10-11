@@ -225,20 +225,31 @@ class AuthService:
             else:
                 oauth_params["options"] = {}
 
-            # ✅ Force account selection for Google OAuth
+            # ✅ Force account selection for Google OAuth + Request calendar/gmail scopes
             if provider == "google":
-                # This ensures the user always sees the “Choose an account” screen
+                # Request calendar scopes for action execution
+                google_scopes = [
+                    "https://www.googleapis.com/auth/userinfo.email",
+                    "https://www.googleapis.com/auth/userinfo.profile",
+                    "https://www.googleapis.com/auth/calendar",
+                    "https://www.googleapis.com/auth/calendar.events",
+                    "https://www.googleapis.com/auth/gmail.modify"
+                ]
+
+                # Force consent screen to ensure new scopes are granted
                 oauth_params["options"]["queryParams"] = {
-                    "prompt": "select_account",
+                    "prompt": "consent",  # Force consent screen (not just account selection)
                     "access_type": "offline",
-                    "include_granted_scopes": "true"
+                    "include_granted_scopes": "true",
+                    "scope": " ".join(google_scopes)
                 }
 
                 # Also set top-level query_params for maximum reliability
                 oauth_params["query_params"] = {
-                    "prompt": "select_account",
+                    "prompt": "consent",  # Force consent screen
                     "access_type": "offline",
-                    "include_granted_scopes": "true"
+                    "include_granted_scopes": "true",
+                    "scope": " ".join(google_scopes)
                 }
 
             print(f"📋 [OAuth] Request params: {oauth_params}")
@@ -276,11 +287,35 @@ class AuthService:
 
                 # Store OAuth tokens if needed for API access
                 if provider in ["google", "github"]:
+                    # For Google, we know what scopes we requested - store them explicitly
+                    # Supabase doesn't always provide granted scopes in the session
+                    scopes = []
+                    if provider == "google":
+                        # These are the scopes we request in sign_in_with_oauth
+                        scopes = [
+                            "https://www.googleapis.com/auth/userinfo.email",
+                            "https://www.googleapis.com/auth/userinfo.profile",
+                            "https://www.googleapis.com/auth/calendar",
+                            "https://www.googleapis.com/auth/calendar.events",
+                            "https://www.googleapis.com/auth/gmail.modify"
+                        ]
+                        print(f"📋 [OAuth] Setting Google scopes to requested scopes: {scopes}")
+
+                    # Also try to get scopes from session if available
+                    if hasattr(response.user, 'user_metadata'):
+                        scopes_str = response.user.user_metadata.get('provider_scopes', '')
+                        if scopes_str:
+                            print(f"📋 [OAuth] Found scopes in user_metadata: {scopes_str}")
+                            scopes = scopes_str.split(' ')
+
+                    print(f"💾 [OAuth] Storing tokens for {provider} with {len(scopes)} scopes")
+
                     await self._store_oauth_tokens(
                         response.user.id,
                         provider,
                         response.session.provider_token,
-                        response.session.provider_refresh_token
+                        response.session.provider_refresh_token,
+                        scopes=scopes
                     )
 
                 return {
@@ -296,7 +331,8 @@ class AuthService:
             raise Exception(f"OAuth callback error: {str(e)}")
 
     async def _store_oauth_tokens(self, user_id: str, provider: str,
-                                  access_token: str, refresh_token: str = None) -> None:
+                                  access_token: str, refresh_token: str = None,
+                                  scopes: list = None) -> None:
         """
         Store OAuth tokens for external service access
 
@@ -305,6 +341,7 @@ class AuthService:
             provider: OAuth provider name
             access_token: OAuth access token
             refresh_token: Optional OAuth refresh token
+            scopes: List of granted OAuth scopes
         """
         try:
             token_data = {
@@ -312,9 +349,12 @@ class AuthService:
                 "provider": provider,
                 "access_token": access_token,  # Should be encrypted in production
                 "refresh_token": refresh_token,  # Should be encrypted in production
+                "scopes": scopes or [],  # Store granted scopes
                 "created_at": datetime.utcnow().isoformat(),
                 "updated_at": datetime.utcnow().isoformat()
             }
+
+            print(f"💾 [OAuth] Storing token data: {{'provider': '{provider}', 'scopes': {scopes}}}")
 
             # Upsert token data
             self.supabase.table("user_oauth_tokens").upsert(
@@ -322,9 +362,11 @@ class AuthService:
                 on_conflict="user_id,provider"
             ).execute()
 
+            print(f"✅ [OAuth] Tokens stored successfully for {provider}")
+
         except Exception as e:
             # Log error but don't fail the auth flow
-            print(f"Failed to store OAuth tokens: {str(e)}")
+            print(f"❌ Failed to store OAuth tokens: {str(e)}")
 
 
 # Singleton instance

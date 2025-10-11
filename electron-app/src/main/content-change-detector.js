@@ -12,6 +12,7 @@ class ContentChangeDetector {
     this.ocrManager = ocrManager
     this.aiAssistant = aiAssistant
     this.isEnabled = false
+    this.hasLoggedPermissionError = false // Track if we've already logged permission errors
 
     // Apps where we monitor for content changes
     this.monitoredApps = [
@@ -121,7 +122,17 @@ class ContentChangeDetector {
       this.previousContent.set(appName, currentContent)
 
     } catch (error) {
-      console.error('❌ [ContentChangeDetector] Error checking content:', error)
+      // Only log permission errors once
+      if (error.message?.includes('screen recording permission')) {
+        if (!this.hasLoggedPermissionError) {
+          console.log('⚠️ [ContentChangeDetector] Screen recording permission required (suppressing future warnings)')
+          this.hasLoggedPermissionError = true
+        }
+        return
+      }
+
+      // Silently ignore other errors (e.g. SIGINT from process interruption)
+      // These are normal when the app is shutting down or switching contexts
     }
   }
 
@@ -130,15 +141,16 @@ class ContentChangeDetector {
   }
 
   async captureContent(activeWindow) {
-    // Use lightweight OCR without full screenshot
+    // Use focused region capture instead of full screen
     const appContext = {
       appName: activeWindow.owner.name,
       windowTitle: activeWindow.title,
       session_id: this.aiAssistant?.sessionId
     }
 
-    // Queue OCR job without waiting for completion
-    const jobId = await this.ocrManager.captureAndQueueOCR(
+    // Capture focused region around mouse/activity
+    const jobId = await this.ocrManager.captureFocusedAndQueue(
+      null,  // Auto-detect region from mouse
       appContext,
       this.aiAssistant?.userId
     )

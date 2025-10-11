@@ -1192,36 +1192,63 @@ Example 3: Generic productivity tip (no direct context)
 
 If ANY answer is "no", return empty suggestions array.
 
-Return JSON format:
+**RETURN FORMAT:**
+
+FOR ACTIONABLE TASKS (meetings, emails, etc.):
 {{
   "suggestions": [
     {{
-      "type": "workflow_optimization|task_completion|context_switch|productivity|knowledge_application",
-      "title": "Specific actionable suggestion based on full context",
+      "type": "task_completion",
+      "title": "Specific action title",
+      "execution_mode": "direct",
+      "action_steps": [
+        {{
+          "action_type": "calendar_create_event" OR "gmail_create_draft",
+          "action_params": {{
+            // For calendar_create_event:
+            "title": "Event title",
+            "start": "2025-10-11T14:00:00",  // ISO datetime
+            "end": "2025-10-11T15:00:00",
+            "attendees": ["email@example.com"]
+            // For gmail_create_draft:
+            "to": "email@example.com",
+            "subject": "Email subject",
+            "body": "Email body"
+          }},
+          "requires_approval": true,
+          "priority": 8
+        }}
+      ],
       "content": {{
-        "short_description": "One concise sentence (max 80 chars) summarizing the suggestion",
-        "description": "Detailed explanation leveraging user history and sequence analysis",
-        "action_steps": ["High-level step 1", "High-level step 2", "High-level step 3"],
-        "expected_benefit": "What this will achieve for the user",
-        "difficulty": "easy|medium|hard",
-        "time_investment": "X minutes",
-        "requires_detailed_guide": true,
-        "tools_needed": ["App/tool name 1", "App/tool name 2"],
-        "platforms": ["macOS", "Windows", "web"]
+        "description": "What this action does"
       }},
-      "confidence": 0.8,
-      "priority": "high|medium|low",
-      "context_data": {{
-        "triggers": ["Specific content or patterns that triggered this suggestion"],
-        "relevant_apps": ["{request.app_sequence[0].appName if request.app_sequence else 'unknown'}"],
-        "time_sensitive": true/false,
-        "personalization_factors": ["User expertise/patterns that informed this suggestion"]
-      }}
+      "confidence": 0.9,
+      "priority": "high"
     }}
   ]
 }}
 
-If insufficient context for meaningful suggestions, return: {{"suggestions": []}}"""
+FOR NON-ACTIONABLE SUGGESTIONS (tips, shortcuts, etc.):
+{{
+  "suggestions": [
+    {{
+      "type": "productivity|workflow|optimization",
+      "title": "Suggestion title",
+      "content": {{
+        "short_description": "Brief summary",
+        "description": "Detailed explanation",
+        "action_steps": ["Manual step 1", "Manual step 2"],
+        "expected_benefit": "What this achieves",
+        "difficulty": "easy|medium|hard",
+        "time_investment": "X minutes"
+      }},
+      "confidence": 0.7,
+      "priority": "medium"
+    }}
+  ]
+}}
+
+If no suggestions, return: {{"suggestions": []}}"""
 
     print("📝 BATCH PROMPT SENT TO LLM:")
     print("-" * 80)
@@ -1956,6 +1983,10 @@ async def process_batch_context(request: BatchContextRequest):
 
         print(f"💡 LLM SUGGESTION RESPONSE: {json.dumps(raw_suggestions, indent=2)}")
 
+        # Log what the LLM returned
+        for i, sug in enumerate(raw_suggestions):
+            has_execution = sug.get("execution_mode") == "direct"
+            print(f"   [{i+1}] '{sug.get('title', 'Untitled')}' - {'✅ HAS execution_mode' if has_execution else '❌ NO execution_mode'}")
 
         # Transform suggestions to match frontend expected format
         suggestions = []

@@ -199,6 +199,61 @@ function LLMChatApp() {
   }, [])
 
   // Send message to LLM
+  // Detect actions from user message
+  const detectAndShowActions = async (userMessage) => {
+    try {
+      console.log('🔍 Detecting actions from message:', userMessage)
+
+      const authToken = await ipcRenderer.invoke('get-auth-token')
+      if (!authToken) {
+        console.warn('⚠️ No auth token available for action detection')
+        return
+      }
+
+      const response = await fetch('http://localhost:8000/api/chat/detect-actions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        },
+        body: JSON.stringify({
+          message: userMessage,
+          context: {
+            app_name: 'LLM Chat',
+            window_title: 'Squire LLM Chat'
+          }
+        })
+      })
+
+      if (!response.ok) {
+        console.error('❌ Action detection failed:', response.status)
+        return
+      }
+
+      const data = await response.json()
+      console.log('📥 Action detection result:', data)
+
+      if (data.has_actions && data.action_steps && data.action_steps.length > 0) {
+        // Add actionable message to chat
+        const actionMessage = {
+          id: Date.now(),
+          role: 'action',
+          content: data.message,
+          timestamp: new Date().toISOString(),
+          execution_mode: 'direct',
+          action_steps: data.action_steps,
+          isActionable: true
+        }
+
+        setMessages(prev => [...prev, actionMessage])
+        console.log('✅ Added actionable message to chat')
+      }
+
+    } catch (error) {
+      console.error('❌ Error detecting actions:', error)
+    }
+  }
+
   const sendMessage = async () => {
     if (!input.trim() || isLoading) return
 
@@ -230,9 +285,17 @@ function LLMChatApp() {
       // Create abort controller for cancellation
       abortControllerRef.current = new AbortController()
 
+      // Add system message with current date context
+      const today = new Date()
+      const dateString = today.toISOString().split('T')[0] // YYYY-MM-DD
+      const systemMessage = {
+        role: 'system',
+        content: `You are a helpful AI assistant with access to Google Calendar and Gmail tools. Today's date is ${dateString}. When scheduling events, use ISO 8601 datetime format with timezone (e.g., "${dateString}T14:00:00Z" for 2pm). For "tomorrow", add 1 day to today's date. For "today at 2pm", use "${dateString}T14:00:00Z".`
+      }
+
       const requestBody = {
         model: selectedModel,
-        messages: [...messages, userMessage].map(m => ({
+        messages: [systemMessage, ...messages, userMessage].map(m => ({
           role: m.role,
           content: m.content
         })),
@@ -262,6 +325,7 @@ function LLMChatApp() {
       const decoder = new TextDecoder()
 
       let accumulatedContent = ''
+      let toolCalls = [] // Track tool calls from GPT-4
 
       while (true) {
         const { done, value } = await reader.read()
@@ -281,6 +345,8 @@ function LLMChatApp() {
 
             try {
               const parsed = JSON.parse(data)
+
+              // Handle text content
               if (parsed.content) {
                 accumulatedContent += parsed.content
 
@@ -291,6 +357,27 @@ function LLMChatApp() {
                     : msg
                 ))
               }
+
+              // Handle tool calls from GPT-4
+              if (parsed.tool_call) {
+                console.log('🔧 Received tool call:', parsed.tool_call)
+
+                // Find existing tool call or create new one
+                const existingIndex = toolCalls.findIndex(tc => tc.id === parsed.tool_call.id)
+                if (existingIndex >= 0) {
+                  // Update existing tool call (accumulate arguments)
+                  if (parsed.tool_call.arguments) {
+                    toolCalls[existingIndex].arguments += parsed.tool_call.arguments
+                  }
+                } else {
+                  // Add new tool call
+                  toolCalls.push({
+                    id: parsed.tool_call.id,
+                    name: parsed.tool_call.name || '',
+                    arguments: parsed.tool_call.arguments || ''
+                  })
+                }
+              }
             } catch (e) {
               console.error('Error parsing SSE data:', e)
             }
@@ -298,10 +385,68 @@ function LLMChatApp() {
         }
       }
 
-      // Mark streaming as complete
+      // Convert tool calls to action_steps format if present
+      let finalMessage = {
+        isStreaming: false
+      }
+
+      if (toolCalls.length > 0) {
+        console.log('✅ Stream complete with tool calls:', toolCalls)
+
+        try {
+          // Convert tool calls to action_steps format
+          const actionSteps = toolCalls.map(tc => {
+            // Skip tool calls with empty or invalid arguments
+            if (!tc.arguments || tc.arguments.trim() === '') {
+              console.warn('⚠️ Skipping tool call with empty arguments:', tc)
+              return null
+            }
+
+            console.log('🔧 Parsing tool call arguments:', tc.name, tc.arguments)
+            const args = JSON.parse(tc.arguments)
+
+            if (tc.name === 'calendar_create_event') {
+              return {
+                action_type: 'calendar_create_event',
+                action_params: {
+                  title: args.title,
+                  start: args.start,
+                  end: args.end,
+                  description: args.description,
+                  location: args.location
+                }
+              }
+            } else if (tc.name === 'gmail_create_draft') {
+              return {
+                action_type: 'gmail_create_draft',
+                action_params: {
+                  to: args.to,
+                  subject: args.subject,
+                  body: args.body
+                }
+              }
+            }
+            return null
+          }).filter(Boolean)
+
+          if (actionSteps.length > 0) {
+            console.log('📋 Converted to action steps:', actionSteps)
+            finalMessage = {
+              ...finalMessage,
+              isActionable: true,
+              action_steps: actionSteps,
+              execution_mode: 'direct'
+            }
+          }
+        } catch (error) {
+          console.error('❌ Error converting tool calls to actions:', error, 'Tool calls:', toolCalls)
+        }
+      }
+
+      // Mark streaming as complete and add actions if present
       setMessages(prev => prev.map(msg =>
         msg.id === assistantMessageId
-          ? { ...msg, isStreaming: false }
+          ? { ...msg, ...finalMessage }
           : msg
       ))
 
@@ -1168,7 +1313,18 @@ function SuggestionCard({ suggestion, isExpanded, onToggle }) {
     setExecutionResult(null)
 
     try {
-      console.log('🚀 Executing action:', suggestion.action_steps)
+      // Convert ID to string to match backend validation
+      const suggestionIdString = suggestion.id ? String(suggestion.id) : null
+      console.log('🔄 [Execute] Converting suggestion_id:', suggestion.id, '→', suggestionIdString, typeof suggestionIdString)
+
+      const payload = {
+        action_steps: suggestion.action_steps,
+        suggestion_id: suggestionIdString
+      }
+
+      console.log('🚀 [Execute] Preparing to execute suggestion actions')
+      console.log('📦 [Execute] Full payload:', JSON.stringify(payload, null, 2))
+      console.log('📋 [Execute] Action steps:', suggestion.action_steps)
 
       // Get auth token from electron store
       const authToken = await ipcRenderer.invoke('get-auth-token')
@@ -1188,20 +1344,41 @@ function SuggestionCard({ suggestion, isExpanded, onToggle }) {
       const response = await fetch('http://localhost:8000/api/actions/execute-direct', {
         method: 'POST',
         headers: headers,
-        body: JSON.stringify({
-          action_steps: suggestion.action_steps,
-          suggestion_id: suggestion.id || null
-        })
+        body: JSON.stringify(payload)
       })
 
       const data = await response.json()
+      console.log('📥 [Execute] Response:', response.status, data)
 
       if (!response.ok) {
         // Handle authentication errors specifically
         if (response.status === 401) {
           throw new Error('Authentication required. Please open Settings and connect your Google account to execute actions.')
         }
-        throw new Error(data.detail || data.error || `HTTP error! status: ${response.status}`)
+
+        // Better error message formatting with field locations
+        console.error('❌ [Execute] Raw error detail:', data.detail)
+
+        let errorMsg = `HTTP ${response.status}`
+        if (data.detail) {
+          if (typeof data.detail === 'string') {
+            errorMsg = data.detail
+          } else if (Array.isArray(data.detail)) {
+            // Pydantic validation errors: include field location
+            errorMsg = data.detail.map(e => {
+              const field = e.loc ? e.loc.join('.') : 'unknown'
+              const msg = e.msg || e.message || 'validation error'
+              return `${field}: ${msg}`
+            }).join('; ')
+          } else {
+            errorMsg = JSON.stringify(data.detail)
+          }
+        } else if (data.error) {
+          errorMsg = typeof data.error === 'string' ? data.error : JSON.stringify(data.error)
+        }
+
+        console.error('❌ [Execute] Formatted error:', errorMsg)
+        throw new Error(errorMsg)
       }
 
       console.log('✅ Action executed successfully:', data)
@@ -1391,21 +1568,43 @@ function SuggestionCard({ suggestion, isExpanded, onToggle }) {
 
                 {/* Execution Result */}
                 {executionResult && (
-                  <div className="p-3 rounded-lg" style={{
+                  <div className="p-3 rounded-lg space-y-2" style={{
                     background: 'rgba(34, 197, 94, 0.1)',
                     border: '1px solid rgba(34, 197, 94, 0.3)'
                   }}>
-                    <div className="text-xs text-green-400 font-medium mb-1">✓ Action Completed</div>
+                    <div className="text-xs text-green-400 font-medium">✓ Action Completed</div>
                     <div className="text-xs text-white/60">
-                      {executionResult.successful_count || 0} of {executionResult.total_count || 0} actions executed successfully
+                      {executionResult.successful_actions || 0} of {executionResult.total_actions || 0} actions executed successfully
                     </div>
                     {executionResult.results && executionResult.results.length > 0 && (
-                      <div className="mt-2 space-y-1">
+                      <div className="mt-2 space-y-2">
                         {executionResult.results.map((result, idx) => (
-                          <div key={idx} className="text-xs text-white/50">
-                            • {result.success ? '✓' : '✗'} {result.action_type || 'Action'}
-                            {result.data && result.data.title && ` - ${result.data.title}`}
-                          </div>
+                          result.success && result.data && (
+                            <div key={idx} className="text-xs space-y-1">
+                              {result.data.title && (
+                                <div className="text-white/70">📅 {result.data.title}</div>
+                              )}
+                              {result.data.start && (
+                                <div className="text-[11px] text-white/50">
+                                  {new Date(result.data.start).toLocaleString()}
+                                </div>
+                              )}
+                              {result.data.html_link && (
+                                <a
+                                  href={result.data.html_link}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 underline text-xs"
+                                  onClick={(e) => {
+                                    e.preventDefault()
+                                    window.require('electron').shell.openExternal(result.data.html_link)
+                                  }}
+                                >
+                                  View in Google Calendar →
+                                </a>
+                              )}
+                            </div>
+                          )
                         ))}
                       </div>
                     )}
@@ -1433,11 +1632,97 @@ function SuggestionCard({ suggestion, isExpanded, onToggle }) {
 
 function ChatMessage({ message }) {
   const isUser = message.role === 'user'
+  const isAction = message.role === 'action' || message.isActionable
   const isError = message.isError
+
+  // State for action execution
+  const [isExecuting, setIsExecuting] = useState(false)
+  const [executionResult, setExecutionResult] = useState(null)
+  const [executionError, setExecutionError] = useState(null)
 
   // Get model name for display
   const modelInfo = MODELS.find(m => m.id === message.model) || MODELS.find(m => m.id === 'gpt-4')
-  const displayName = isUser ? 'You' : `${modelInfo?.name || 'Assistant'}`
+  // Show model name for assistant messages with tool calls, only show "Squire Actions" for separate action messages
+  const displayName = isUser ? 'You' : message.role === 'action' ? 'Squire Actions' : `${modelInfo?.name || 'Assistant'}`
+
+  // Execute action
+  const executeAction = async () => {
+    if (!isAction || isExecuting) return
+
+    setIsExecuting(true)
+    setExecutionError(null)
+    setExecutionResult(null)
+
+    try {
+      // Convert ID to string to match backend validation
+      const suggestionIdString = message.id ? String(message.id) : null
+      console.log('🔄 [Execute] Converting suggestion_id:', message.id, '→', suggestionIdString, typeof suggestionIdString)
+
+      const payload = {
+        action_steps: message.action_steps,
+        suggestion_id: suggestionIdString
+      }
+
+      console.log('🚀 [Execute] Preparing to execute actions')
+      console.log('📦 [Execute] Full payload:', JSON.stringify(payload, null, 2))
+      console.log('📋 [Execute] Action steps:', message.action_steps)
+
+      const authToken = await ipcRenderer.invoke('get-auth-token')
+      if (!authToken) {
+        throw new Error('Not authenticated. Please log in to execute actions.')
+      }
+
+      const response = await fetch('http://localhost:8000/api/actions/execute-direct', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        },
+        body: JSON.stringify(payload)
+      })
+
+      const data = await response.json()
+      console.log('📥 [Execute] Response:', response.status, data)
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Authentication required. Please open Settings and connect your Google account to execute actions.')
+        }
+
+        // Better error message formatting with field locations
+        console.error('❌ [Execute] Raw error detail:', data.detail)
+
+        let errorMsg = `HTTP ${response.status}`
+        if (data.detail) {
+          if (typeof data.detail === 'string') {
+            errorMsg = data.detail
+          } else if (Array.isArray(data.detail)) {
+            // Pydantic validation errors: include field location
+            errorMsg = data.detail.map(e => {
+              const field = e.loc ? e.loc.join('.') : 'unknown'
+              const msg = e.msg || e.message || 'validation error'
+              return `${field}: ${msg}`
+            }).join('; ')
+          } else {
+            errorMsg = JSON.stringify(data.detail)
+          }
+        } else if (data.error) {
+          errorMsg = typeof data.error === 'string' ? data.error : JSON.stringify(data.error)
+        }
+
+        console.error('❌ [Execute] Formatted error:', errorMsg)
+        throw new Error(errorMsg)
+      }
+
+      console.log('✅ Action executed successfully:', data)
+      setExecutionResult(data)
+    } catch (error) {
+      console.error('❌ Error executing action:', error)
+      setExecutionError(error.message)
+    } finally {
+      setIsExecuting(false)
+    }
+  }
 
   // Simple markdown rendering
   const renderContent = (content) => {
@@ -1466,11 +1751,11 @@ function ChatMessage({ message }) {
   return (
     <div className="flex gap-3">
       <div className="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-medium" style={{
-        background: isUser ? 'rgba(59, 130, 246, 0.2)' : 'rgba(100, 116, 139, 0.2)',
-        color: isUser ? 'rgba(147, 197, 253, 0.9)' : 'rgba(203, 213, 225, 0.9)',
-        border: `1px solid ${isUser ? 'rgba(59, 130, 246, 0.3)' : 'rgba(100, 116, 139, 0.3)'}`
+        background: isUser ? 'rgba(59, 130, 246, 0.2)' : isAction ? 'rgba(34, 197, 94, 0.2)' : 'rgba(100, 116, 139, 0.2)',
+        color: isUser ? 'rgba(147, 197, 253, 0.9)' : isAction ? 'rgba(134, 239, 172, 0.9)' : 'rgba(203, 213, 225, 0.9)',
+        border: `1px solid ${isUser ? 'rgba(59, 130, 246, 0.3)' : isAction ? 'rgba(34, 197, 94, 0.3)' : 'rgba(100, 116, 139, 0.3)'}`
       }}>
-        {isUser ? 'U' : 'A'}
+        {isUser ? 'U' : isAction ? '⚡' : 'A'}
       </div>
       <div className="flex-1 min-w-0">
         <div className="text-xs text-white/40 mb-1.5 font-medium">
@@ -1484,6 +1769,99 @@ function ChatMessage({ message }) {
         />
         {message.isStreaming && (
           <span className="inline-block w-1.5 h-3.5 ml-1 bg-blue-400/70 animate-pulse rounded-sm" />
+        )}
+
+        {/* Execute button for action messages */}
+        {isAction && message.action_steps && (
+          <div className="mt-3">
+            <button
+              onClick={executeAction}
+              disabled={isExecuting || executionResult}
+              className="px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2"
+              style={{
+                background: isExecuting
+                  ? 'rgba(71, 85, 105, 0.3)'
+                  : executionResult
+                  ? 'rgba(34, 197, 94, 0.2)'
+                  : 'rgba(59, 130, 246, 0.3)',
+                border: `1px solid ${
+                  isExecuting
+                    ? 'rgba(71, 85, 105, 0.4)'
+                    : executionResult
+                    ? 'rgba(34, 197, 94, 0.4)'
+                    : 'rgba(59, 130, 246, 0.4)'
+                }`,
+                color: isExecuting ? 'rgba(255, 255, 255, 0.5)' : executionResult ? 'rgba(34, 197, 94, 0.9)' : 'rgba(147, 197, 253, 0.9)',
+                cursor: isExecuting || executionResult ? 'not-allowed' : 'pointer'
+              }}
+            >
+              {isExecuting ? (
+                <>
+                  <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10" opacity="0.25"></circle>
+                    <path d="M12 2a10 10 0 0 1 10 10" opacity="0.75"></path>
+                  </svg>
+                  <span>Executing...</span>
+                </>
+              ) : executionResult ? (
+                <>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="20 6 9 17 4 12"></polyline>
+                  </svg>
+                  <span>Executed Successfully</span>
+                </>
+              ) : (
+                <>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                  </svg>
+                  <span>Execute Action</span>
+                </>
+              )}
+            </button>
+
+            {executionError && (
+              <div className="mt-2 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded px-3 py-2">
+                {executionError}
+              </div>
+            )}
+
+            {executionResult && (
+              <div className="mt-2 text-xs bg-green-500/10 border border-green-500/20 rounded px-3 py-2 space-y-2">
+                <div className="text-green-400 font-medium">
+                  ✓ Action completed: {executionResult.successful_actions} successful, {executionResult.failed_actions} failed
+                </div>
+                {executionResult.results && executionResult.results.map((result, idx) => (
+                  result.success && result.data && (
+                    <div key={idx} className="text-white/70 space-y-1">
+                      {result.data.title && (
+                        <div>📅 {result.data.title}</div>
+                      )}
+                      {result.data.start && (
+                        <div className="text-[11px] text-white/50">
+                          {new Date(result.data.start).toLocaleString()}
+                        </div>
+                      )}
+                      {result.data.html_link && (
+                        <a
+                          href={result.data.html_link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 underline"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            window.require('electron').shell.openExternal(result.data.html_link)
+                          }}
+                        >
+                          View in Google Calendar →
+                        </a>
+                      )}
+                    </div>
+                  )
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>

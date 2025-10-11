@@ -12,6 +12,7 @@ import EfficientKeystrokeCollector from './keystroke-collector.js'
 import VisionScheduler from './vision-scheduler.js'
 import SmartActionDetector from './smart-action-detector.js'
 import ContentChangeDetector from './content-change-detector.js'
+import preferencesManager from './preferences-manager.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -55,8 +56,19 @@ function getCurrentUserId() {
 }
 
 // Track detected apps for settings UI
+// Load detected apps from local storage on startup
 let detectedApps = new Set();
 let appPreferences = new Map(); // Cache of app preferences
+
+// Function to initialize detected apps from preferences
+function loadDetectedApps() {
+  const savedApps = preferencesManager.getDetectedApps();
+  detectedApps = new Set(savedApps);
+  console.log(`📱 [Main] Loaded ${detectedApps.size} detected apps from local storage`);
+
+  // Ensure all detected apps have preference entries
+  preferencesManager.syncDetectedAppsWithPreferences();
+}
 
 // Hub expansion state
 let isHubExpanded = false;
@@ -244,7 +256,7 @@ class OCRBatchManager {
   constructor() {
     this.pendingBatch = [];
     this.batchTimeout = null;
-    this.batchWindow = 10000;
+    this.batchWindow = 2000;  // Reduced from 10000 for faster suggestions
     this.maxBatchSize = 5;
     this.currentSequenceId = null;
     this.pendingOCRJobs = new Map();
@@ -1052,12 +1064,18 @@ function createSettingsWindow() {
     skipTaskbar: false,
     focusable: true,
     fullscreenable: false,
-    alwaysOnTop: false,
+    alwaysOnTop: true,  // Keep on top to prevent space switching
     backgroundColor: '#1a1a1a',
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
     },
+  });
+
+  // Prevent desktop/space switching when showing window
+  settingsWindow.setVisibleOnAllWorkspaces(true, {
+    visibleOnFullScreen: true,
+    skipTransformProcessType: true
   });
 
   if (process.env.VITE_DEV_SERVER_URL) {
@@ -1384,7 +1402,27 @@ ipcMain.handle('auth-check', async () => {
 })
 
 ipcMain.handle('get-auth-token', async () => {
-  return authStore.getAccessToken()
+  const token = authStore.getAccessToken()
+  console.log('🔑 [IPC] get-auth-token called, returning:', token ? `${token.substring(0, 20)}...` : 'null')
+  return token
+})
+
+ipcMain.handle('refresh-auth-token', async () => {
+  try {
+    console.log('🔄 Manual token refresh requested')
+    await authStore.checkAndRefreshToken()
+    return { success: true, token: authStore.getAccessToken() }
+  } catch (error) {
+    console.error('❌ Manual token refresh failed:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+// Show login window (triggers Google OAuth)
+ipcMain.on('show-login', async (event) => {
+  console.log('🔑 Show login requested')
+  // Trigger Google OAuth flow
+  ipcMain.emit('auth-google', event)
 })
 
 ipcMain.on('auth-google', async (event) => {
@@ -1488,6 +1526,9 @@ ipcMain.on('auth-google', async (event) => {
 })
 
 function setupPipelines() {
+  // Load detected apps from local storage
+  loadDetectedApps();
+
   ocrManager = new OCRManager(suggestionsWindow);
   ocrBatchManager = new OCRBatchManager();
 
@@ -1518,13 +1559,13 @@ function setupPipelines() {
 
   // Initialize Smart Action Detector for typing-based action detection
   smartActionDetector = new SmartActionDetector(aiAssistant, ocrManager);
-  smartActionDetector.start();
-  console.log('✨ [Main] SmartActionDetector started');
+  // DON'T start it here - will start when vision is enabled
+  console.log('✨ [Main] SmartActionDetector initialized (not started)');
 
   // Initialize Content Change Detector for monitoring actionable apps
   contentChangeDetector = new ContentChangeDetector(ocrManager, aiAssistant);
-  contentChangeDetector.start();
-  console.log('✨ [Main] ContentChangeDetector started');
+  // DON'T start it here - will start when vision is enabled
+  console.log('✨ [Main] ContentChangeDetector initialized (not started)');
 
   keystrokeCollector = new EfficientKeystrokeCollector(processKeystrokeSequence);
 
@@ -1551,6 +1592,13 @@ function setupPipelines() {
   visionScheduler = new VisionScheduler('http://127.0.0.1:8000', currentUserId, currentSessionId);
   visionScheduler.startScheduling();
 
+  // Connect activity tracker to vision scheduler for mouse-based focused captures
+  visionScheduler.setActivityTracker(activityTracker);
+
+  // Start focused vision captures around mouse activity (more frequent, smaller regions)
+  visionScheduler.startFocusedCaptures();
+  // Note: actual start depends on globalVisionEnabled check inside startFocusedCaptures()
+
   // Pass visionScheduler reference to activityTracker so it can check global vision state
   activityTracker.setVisionScheduler(visionScheduler);
 
@@ -1559,6 +1607,9 @@ function setupPipelines() {
 
   // Pass visionScheduler reference to ocrManager so it can check global vision state
   ocrManager.setVisionScheduler(visionScheduler);
+
+  // Connect activity tracker to OCR manager for mouse-based focused captures
+  ocrManager.setActivityTracker(activityTracker);
 
   // Pass visionScheduler reference to smartOCRScheduler so it can check global vision state
   smartOCRScheduler.setVisionScheduler(visionScheduler);
@@ -1589,6 +1640,11 @@ function setupPipelines() {
       if (appInfo.appName) {
         const wasNewApp = !detectedApps.has(appInfo.appName);
         detectedApps.add(appInfo.appName);
+
+        // Persist new app to local storage
+        if (wasNewApp) {
+          preferencesManager.addDetectedApp(appInfo.appName);
+        }
 
         // Broadcast to settings window if it's open
         if (wasNewApp) {
@@ -1621,8 +1677,21 @@ function setupPipelines() {
   });
 
   setTimeout(async () => {
+    // Check if vision/tracking is enabled before starting services
+    const trackingEnabled = visionScheduler && visionScheduler.globalVisionEnabled;
+    console.log(`🎯 [Main] Tracking services enabled: ${trackingEnabled}`);
+
+    if (!trackingEnabled) {
+      console.log('🚫 [Main] Vision/tracking disabled - NOT starting activity/OCR/keystroke tracking');
+      console.log('💡 [Main] Enable vision from the UI to start tracking services');
+      return;
+    }
+
+    console.log('✅ [Main] Starting all tracking services...');
+
     try {
       appTracker.startTracking();
+      console.log('✅ [Main] App tracker started');
     } catch (e) {
       console.error("App tracker failed to start:", e);
       if (process.platform === "darwin") {
@@ -1641,13 +1710,27 @@ function setupPipelines() {
     }
     try {
       await activityTracker.startTracking();
+      console.log('✅ [Main] Activity tracker started');
     } catch (e) {
       console.error("Activity tracker failed to start:", e);
     }
     try {
       keystrokeCollector.startTracking();
+      console.log('✅ [Main] Keystroke collector started');
     } catch (e) {
       console.error("Keystroke collector failed to start:", e);
+    }
+    try {
+      smartActionDetector.start();
+      console.log('✅ [Main] SmartActionDetector started');
+    } catch (e) {
+      console.error("SmartActionDetector failed to start:", e);
+    }
+    try {
+      await contentChangeDetector.start();
+      console.log('✅ [Main] ContentChangeDetector started');
+    } catch (e) {
+      console.error("ContentChangeDetector failed to start:", e);
     }
   }, 800);
 }
@@ -1858,6 +1941,7 @@ app.on("before-quit", () => {
 
   if (visionScheduler) {
     visionScheduler.stopScheduling();
+    visionScheduler.stopFocusedCaptures();
   }
 
   if (smartActionDetector) {
@@ -2226,36 +2310,22 @@ ipcMain.on("close-settings", () => {
 });
 
 ipcMain.on("get-detected-apps", (event) => {
+  // Load from preferences to ensure we have the latest persisted apps
+  loadDetectedApps();
   event.reply("detected-apps", Array.from(detectedApps));
 });
 
 ipcMain.on("load-app-preferences", async (event) => {
   try {
-    console.log(`📋 [Main] Loading app preferences for user: ${currentUserId}`);
+    console.log(`📋 [Main] Loading app preferences from local storage`);
 
-    // Get auth token for API call
-    const token = authStore.getAccessToken();
-    const headers = {
-      "Content-Type": "application/json",
-    };
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
+    // Get all preferences from local preferences manager
+    const prefs = preferencesManager.getAllPreferences();
 
-    const response = await fetch(`http://127.0.0.1:8000/api/vision/preferences/${currentUserId}`, {
-      method: "GET",
-      headers: headers,
-    });
+    console.log(`✅ [Main] Loaded ${prefs?.length || 0} app preferences from local storage`);
+    console.log(`📋 [Main] Apps:`, prefs?.map(p => p.app_name).join(', '));
 
-    if (response.ok) {
-      const prefs = await response.json();
-      console.log(`✅ [Main] Loaded ${prefs?.length || 0} app preferences from backend`);
-      console.log(`📋 [Main] Apps:`, prefs?.map(p => p.app_name).join(', '));
-      event.reply("app-preferences-loaded", prefs);
-    } else {
-      console.error(`❌ [Main] Failed to load app preferences: ${response.status}`);
-      event.reply("app-preferences-loaded", []);
-    }
+    event.reply("app-preferences-loaded", prefs);
   } catch (error) {
     console.error("❌ [Main] Error loading app preferences:", error);
     event.reply("app-preferences-loaded", []);
@@ -2264,50 +2334,134 @@ ipcMain.on("load-app-preferences", async (event) => {
 
 ipcMain.on("update-app-preference", async (event, { appName, updates }) => {
   try {
-    // Get auth token for API call
-    const token = authStore.getAccessToken();
-    const headers = {
-      "Content-Type": "application/json",
-    };
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
+    console.log(`📋 [Main] Updating app preference for "${appName}" in local storage`);
+
+    // Update preference in local storage
+    const updatedPreference = preferencesManager.updateAppPreference(appName, updates);
+
+    // Update local cache
+    appPreferences.set(appName.toLowerCase(), updatedPreference);
+
+    // Refresh VisionScheduler preferences for this app
+    if (visionScheduler) {
+      visionScheduler.refreshAppPreference(appName);
     }
 
-    const response = await fetch(`http://127.0.0.1:8000/api/vision/preferences/${currentUserId}/${appName}`, {
-      method: "PUT",
-      headers: headers,
-      body: JSON.stringify(updates),
-    });
+    console.log(`✅ [Main] Updated preference for "${appName}"`);
 
-    if (response.ok) {
-      const result = await response.json();
-
-      // Update local cache
-      appPreferences.set(appName, { ...appPreferences.get(appName), ...updates });
-
-      // Refresh VisionScheduler preferences for this app
-      if (visionScheduler) {
-        visionScheduler.refreshAppPreference(appName);
-      }
-
-      // Send confirmation back with full updated preference
-      event.reply("preference-updated", { appName, updates: result.data || updates });
-    } else {
-      const errorText = await response.text();
-      console.error(`❌ [Main] Failed to update preference for "${appName}": ${response.status}`, errorText);
-    }
+    // Send confirmation back with full updated preference
+    event.reply("preference-updated", { appName, updates: updatedPreference });
   } catch (error) {
     console.error(`❌ [Main] Error updating preference for "${appName}":`, error);
   }
 });
 
-ipcMain.on("toggle-global-vision", (event, enabled) => {
+ipcMain.on("toggle-global-vision", async (event, enabled) => {
   console.log(`🔄 [MAIN] Toggle global vision received: ${enabled}`);
   console.log(`🔄 [MAIN] Current visionScheduler state: ${visionScheduler ? visionScheduler.globalVisionEnabled : 'undefined'}`);
 
   if (visionScheduler) {
     visionScheduler.setGlobalVisionEnabled(enabled);
     console.log(`✅ [MAIN] Vision scheduler globalVisionEnabled now: ${visionScheduler.globalVisionEnabled}`);
+
+    // Start or stop tracking services based on vision state
+    if (enabled) {
+      console.log('✅ [MAIN] Vision enabled - starting tracking services...');
+
+      // Start all tracking services
+      try {
+        if (appTracker && appTracker.watchId === null) {
+          appTracker.startTracking();
+          console.log('✅ [MAIN] App tracker started');
+        }
+      } catch (e) {
+        console.error('❌ [MAIN] Failed to start app tracker:', e);
+      }
+
+      try {
+        if (activityTracker && !activityTracker.isTracking) {
+          await activityTracker.startTracking();
+          console.log('✅ [MAIN] Activity tracker started');
+        }
+      } catch (e) {
+        console.error('❌ [MAIN] Failed to start activity tracker:', e);
+      }
+
+      try {
+        if (keystrokeCollector && !keystrokeCollector.isTracking) {
+          keystrokeCollector.startTracking();
+          console.log('✅ [MAIN] Keystroke collector started');
+        }
+      } catch (e) {
+        console.error('❌ [MAIN] Failed to start keystroke collector:', e);
+      }
+
+      try {
+        if (smartActionDetector && !smartActionDetector.isEnabled) {
+          smartActionDetector.start();
+          console.log('✅ [MAIN] SmartActionDetector started');
+        }
+      } catch (e) {
+        console.error('❌ [MAIN] Failed to start SmartActionDetector:', e);
+      }
+
+      try {
+        if (contentChangeDetector && !contentChangeDetector.isEnabled) {
+          await contentChangeDetector.start();
+          console.log('✅ [MAIN] ContentChangeDetector started');
+        }
+      } catch (e) {
+        console.error('❌ [MAIN] Failed to start ContentChangeDetector:', e);
+      }
+    } else {
+      console.log('🚫 [MAIN] Vision disabled - stopping tracking services...');
+
+      // Stop all tracking services
+      try {
+        if (appTracker && appTracker.watchId !== null) {
+          appTracker.stopTracking();
+          console.log('🛑 [MAIN] App tracker stopped');
+        }
+      } catch (e) {
+        console.error('❌ [MAIN] Failed to stop app tracker:', e);
+      }
+
+      try {
+        if (activityTracker && activityTracker.isTracking) {
+          await activityTracker.stopTracking();
+          console.log('🛑 [MAIN] Activity tracker stopped');
+        }
+      } catch (e) {
+        console.error('❌ [MAIN] Failed to stop activity tracker:', e);
+      }
+
+      try {
+        if (keystrokeCollector && keystrokeCollector.isTracking) {
+          keystrokeCollector.stopTracking();
+          console.log('🛑 [MAIN] Keystroke collector stopped');
+        }
+      } catch (e) {
+        console.error('❌ [MAIN] Failed to stop keystroke collector:', e);
+      }
+
+      try {
+        if (smartActionDetector && smartActionDetector.isEnabled) {
+          smartActionDetector.stop();
+          console.log('🛑 [MAIN] SmartActionDetector stopped');
+        }
+      } catch (e) {
+        console.error('❌ [MAIN] Failed to stop SmartActionDetector:', e);
+      }
+
+      try {
+        if (contentChangeDetector && contentChangeDetector.isEnabled) {
+          contentChangeDetector.stop();
+          console.log('🛑 [MAIN] ContentChangeDetector stopped');
+        }
+      } catch (e) {
+        console.error('❌ [MAIN] Failed to stop ContentChangeDetector:', e);
+      }
+    }
 
     // Broadcast state change to all vision toggle windows
     if (visionToggleWindow && !visionToggleWindow.isDestroyed()) {

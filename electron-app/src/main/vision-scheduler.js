@@ -3,6 +3,7 @@ import { desktopCapturer, screen, app } from 'electron'
 import FormData from 'form-data'
 import axios from 'axios'
 import authStore from './auth-store.js'
+import preferencesManager from './preferences-manager.js'
 import fs from 'fs'
 import path from 'path'
 
@@ -12,25 +13,29 @@ class VisionScheduler {
     this.userId = userId;
     this.sessionId = sessionId;
     this.captureInterval = null;
+    this.focusedCaptureInterval = null;  // For frequent focused captures
     this.isCapturing = false;
     this.currentApp = null;
     this.appPreferences = new Map();
     this.statePath = path.join(app.getPath('userData'), 'vision-state.json');
+    this.activityTracker = null;  // Will be set for mouse-based captures
 
-    // Load saved state or default to true (vision enabled by default)
-    this.globalVisionEnabled = this.loadVisionState();
+    // ALWAYS start disabled (do not persist across sessions)
+    this.globalVisionEnabled = false;
+    console.log('📸 [VisionScheduler] Vision starts DISABLED by default (no persistence)');
 
-    // TEMPORARY: Force enable vision for testing
-    if (!this.globalVisionEnabled) {
-      console.log('📸 [VisionScheduler] Forcing vision enabled for testing');
-      this.setGlobalVisionEnabled(true);
-    }
-
-    // Default intervals (in milliseconds)
+    // Default intervals (in milliseconds) - for FULL screen captures
     this.intervals = {
-      'low': 60000,      // 1 minute - for passive apps
-      'normal': 15000,   // 15 seconds - standard apps
-      'high': 5000       // 5 seconds - for actionable apps (Gmail, Calendar, etc.)
+      'low': 120000,     // 2 minutes - for passive apps (reduced frequency)
+      'normal': 60000,   // 1 minute - standard apps (reduced frequency)
+      'high': 30000      // 30 seconds - for actionable apps (reduced frequency)
+    };
+
+    // Focused capture intervals - much more frequent around mouse activity
+    this.focusedIntervals = {
+      'low': 30000,      // 30 seconds
+      'normal': 10000,   // 10 seconds
+      'high': 3000       // 3 seconds - very frequent for actionable apps
     };
 
     // Actionable apps that need high-frequency vision
@@ -52,30 +57,23 @@ class VisionScheduler {
 
   /**
    * Load vision state from disk
+   * NOTE: This function is no longer used - vision always starts disabled
    */
   loadVisionState() {
-    try {
-      if (fs.existsSync(this.statePath)) {
-        const data = fs.readFileSync(this.statePath, 'utf8');
-        const state = JSON.parse(data);
-        console.log(`📸 [VisionScheduler] Loaded vision state from disk: ${state.enabled}`);
-        return state.enabled !== undefined ? state.enabled : false;
-      }
-    } catch (error) {
-      console.error('📸 [VisionScheduler] Failed to load vision state:', error);
-    }
-    // Default to true (vision enabled) for testing
-    console.log('📸 [VisionScheduler] No saved state, defaulting to ENABLED');
-    return true;
+    // DEPRECATED: Vision no longer persists across sessions
+    // Always starts disabled for privacy/performance
+    return false;
   }
 
   /**
    * Save vision state to disk
+   * NOTE: State is NOT loaded on startup - vision always starts disabled
    */
   saveVisionState() {
+    // We still save for debugging purposes, but don't load it on startup
     try {
       fs.writeFileSync(this.statePath, JSON.stringify({ enabled: this.globalVisionEnabled }, null, 2));
-      console.log(`📸 [VisionScheduler] Saved vision state: ${this.globalVisionEnabled}`);
+      console.log(`📸 [VisionScheduler] Saved vision state: ${this.globalVisionEnabled} (for debugging only - not loaded on startup)`);
     } catch (error) {
       console.error('📸 [VisionScheduler] Failed to save vision state:', error);
     }
@@ -93,8 +91,13 @@ class VisionScheduler {
     console.log(`📸 [VisionScheduler] Loaded ${this.appPreferences.size} app preferences`);
     console.log(`📸 [VisionScheduler] Global vision enabled: ${this.globalVisionEnabled}`);
 
-    // Start capture loop
-    this.scheduleNextCapture();
+    // Only start capture loop if vision is enabled
+    if (this.globalVisionEnabled) {
+      console.log('📸 [VisionScheduler] Vision is enabled, starting capture loop');
+      this.scheduleNextCapture();
+    } else {
+      console.log('📸 [VisionScheduler] Vision is disabled, NOT starting capture loop');
+    }
   }
 
   /**
@@ -133,91 +136,59 @@ class VisionScheduler {
     // Save state to disk
     this.saveVisionState();
 
-    if (!enabled && this.captureInterval) {
-      console.log('📸 [VisionScheduler] Stopping scheduling because vision is disabled');
+    if (!enabled) {
+      // Stop all capture loops when disabled
+      console.log('📸 [VisionScheduler] Stopping all capture loops because vision is disabled');
       this.stopScheduling();
-    } else if (enabled && !this.captureInterval) {
-      console.log('📸 [VisionScheduler] Starting scheduling because vision is enabled');
-      this.scheduleNextCapture();
+      this.stopFocusedCaptures();
+    } else {
+      // Start both capture loops when enabled
+      console.log('📸 [VisionScheduler] Starting all capture loops because vision is enabled');
+      if (!this.captureInterval) {
+        this.scheduleNextCapture();
+      }
+      if (!this.focusedCaptureInterval) {
+        this.startFocusedCaptures();
+      }
     }
   }
 
   /**
-   * Load app preferences from backend
+   * Load app preferences from local storage (FAST!)
    */
   async loadAppPreferences() {
     try {
-      // Get auth token and user for API call
-      const token = authStore.getAccessToken();
-      const user = authStore.getUser();
-      if (!user?.id) {
-        console.error('📸 [VisionScheduler] ❌ No user ID available');
-        return;
-      }
+      // Get all preferences from local storage
+      const prefs = preferencesManager.getAllPreferences();
 
-      const headers = {};
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-
-      const response = await fetch(`${this.backendUrl}/api/vision/preferences/${user.id}`, {
-        headers: headers
+      // Store in Map for fast lookup
+      this.appPreferences.clear();
+      prefs.forEach(pref => {
+        this.appPreferences.set(pref.app_name.toLowerCase(), pref);
       });
 
-      if (response.ok) {
-        const prefs = await response.json();
-
-        // Store in Map for fast lookup
-        this.appPreferences.clear();
-        prefs.forEach(pref => {
-          this.appPreferences.set(pref.app_name, pref);
-        });
-
-        prefs.forEach(pref => {
-        });
-      } else {
-        console.error('📸 [VisionScheduler] ❌ Failed to load app preferences:', response.status);
-      }
+      console.log(`📸 [VisionScheduler] Loaded ${prefs.length} local app preferences`);
     } catch (error) {
       console.error('📸 [VisionScheduler] ❌ Error loading app preferences:', error);
     }
   }
 
   /**
-   * Refresh preferences for a specific app
+   * Refresh preferences for a specific app from local storage
    */
   async refreshAppPreference(appName) {
     try {
-      // Get auth token and user for API call
-      const token = authStore.getAccessToken();
-      const user = authStore.getUser();
-      if (!user?.id) {
-        console.error('📸 [VisionScheduler] ❌ No user ID available');
-        return;
-      }
+      const pref = preferencesManager.getAppPreference(appName);
 
-      const headers = {};
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
+      if (pref) {
+        this.appPreferences.set(appName.toLowerCase(), pref);
 
-      const response = await fetch(`${this.backendUrl}/api/vision/preferences/${user.id}`, {
-        headers: headers
-      });
-
-      if (response.ok) {
-        const prefs = await response.json();
-        const pref = prefs.find(p => p.app_name === appName);
-
-        if (pref) {
-          this.appPreferences.set(appName, pref);
-
-          // If this is the current app, reschedule based on new settings
-          if (this.currentApp === appName) {
-            this.reschedule();
-          }
-        } else {
+        // If this is the current app, reschedule based on new settings
+        if (this.currentApp === appName) {
+          this.reschedule();
         }
+
+        console.log(`📸 [VisionScheduler] Refreshed preference for ${appName}`);
       }
     } catch (error) {
       console.error(`📸 [VisionScheduler] ❌ Error refreshing preference for ${appName}:`, error);
@@ -236,10 +207,14 @@ class VisionScheduler {
       return false;
     }
 
-    const pref = this.appPreferences.get(this.currentApp);
+    // Get preference (will return defaults if not set)
+    let pref = this.appPreferences.get(this.currentApp.toLowerCase());
 
     if (!pref) {
-      return false;
+      // Get default from preferences manager
+      pref = preferencesManager.getAppPreference(this.currentApp);
+      // Cache it for next time
+      this.appPreferences.set(this.currentApp.toLowerCase(), pref);
     }
 
     const shouldCapture = pref.allow_vision === true;
@@ -416,6 +391,183 @@ class VisionScheduler {
         // Error setting up request
         console.error('📸 [VisionScheduler] ❌ Error queuing vision job:', error.message);
       }
+    }
+  }
+
+  /**
+   * Set activity tracker for mouse-based focused captures
+   */
+  setActivityTracker(activityTracker) {
+    this.activityTracker = activityTracker;
+  }
+
+  /**
+   * Start focused vision captures around mouse activity
+   */
+  startFocusedCaptures() {
+    if (this.focusedCaptureInterval) {
+      clearTimeout(this.focusedCaptureInterval);
+    }
+
+    // Only start if vision is enabled
+    if (!this.globalVisionEnabled) {
+      console.log('📸 [VisionScheduler] Vision is disabled, NOT starting focused captures');
+      return;
+    }
+
+    const interval = this.getFocusedCaptureInterval();
+
+    this.focusedCaptureInterval = setTimeout(async () => {
+      await this.performFocusedCapture();
+      this.startFocusedCaptures(); // Reschedule
+    }, interval);
+
+    console.log(`📸 [VisionScheduler] Started focused captures (${interval}ms interval)`);
+  }
+
+  /**
+   * Stop focused vision captures
+   */
+  stopFocusedCaptures() {
+    if (this.focusedCaptureInterval) {
+      clearTimeout(this.focusedCaptureInterval);
+      this.focusedCaptureInterval = null;
+    }
+  }
+
+  /**
+   * Get interval for focused captures based on current app
+   */
+  getFocusedCaptureInterval() {
+    if (!this.currentApp) {
+      return this.focusedIntervals.normal;
+    }
+
+    // Check if this is an actionable app - capture more frequently
+    const isActionableApp = this.actionableApps.some(app =>
+      this.currentApp.toLowerCase().includes(app)
+    );
+
+    if (isActionableApp) {
+      return this.focusedIntervals.high; // 3 seconds
+    }
+
+    const pref = this.appPreferences.get(this.currentApp);
+    if (!pref || !pref.vision_frequency) {
+      return this.focusedIntervals.normal;
+    }
+
+    return this.focusedIntervals[pref.vision_frequency] || this.focusedIntervals.normal;
+  }
+
+  /**
+   * Perform focused screenshot capture around mouse position
+   */
+  async performFocusedCapture() {
+    if (this.isCapturing || !this.shouldCapture()) {
+      return;
+    }
+
+    this.isCapturing = true;
+
+    try {
+      // Get mouse position from activity tracker
+      let region;
+      if (this.activityTracker) {
+        const mousePos = this.activityTracker.lastMousePosition || { x: 960, y: 540 };
+        region = {
+          x: Math.max(0, mousePos.x - 400),
+          y: Math.max(0, mousePos.y - 300),
+          width: 800,
+          height: 600
+        };
+        console.log(`🎯 [VisionScheduler] Focused capture around mouse (${mousePos.x}, ${mousePos.y})`);
+      } else {
+        // Default center region
+        region = { x: 560, y: 240, width: 800, height: 600 };
+      }
+
+      // Get primary display
+      const primaryDisplay = screen.getPrimaryDisplay();
+      const { width: screenWidth, height: screenHeight } = primaryDisplay.size;
+
+      // Ensure region is within bounds
+      region.x = Math.max(0, Math.min(region.x, screenWidth - region.width));
+      region.y = Math.max(0, Math.min(region.y, screenHeight - region.height));
+
+      // Capture full screen
+      const sources = await desktopCapturer.getSources({
+        types: ['screen'],
+        thumbnailSize: { width: screenWidth, height: screenHeight }
+      });
+
+      if (sources.length === 0) {
+        console.error('📸 [VisionScheduler] ❌ No screen sources available');
+        return;
+      }
+
+      const screenshot = sources[0].thumbnail;
+
+      // Crop to focused region
+      const croppedImage = screenshot.crop(region);
+      const screenshotBuffer = croppedImage.toPNG();
+
+      console.log(`✅ [VisionScheduler] Captured focused ${region.width}x${region.height} (${screenshotBuffer.length} bytes)`);
+
+      // Queue focused vision job
+      await this.queueFocusedVisionJob(screenshotBuffer, region);
+
+    } catch (error) {
+      console.error('📸 [VisionScheduler] ❌ Error capturing focused screenshot:', error);
+    } finally {
+      this.isCapturing = false;
+    }
+  }
+
+  /**
+   * Queue focused vision job with region metadata
+   */
+  async queueFocusedVisionJob(screenshotBuffer, region) {
+    try {
+      const pref = this.appPreferences.get(this.currentApp);
+      const allowScreenshots = pref?.allow_screenshots || false;
+
+      const formData = new FormData();
+
+      formData.append('file', screenshotBuffer, {
+        filename: `focused-${Date.now()}.png`,
+        contentType: 'image/png'
+      });
+      formData.append('app_name', this.currentApp);
+      formData.append('session_id', this.sessionId);
+      formData.append('allow_screenshots', String(allowScreenshots));
+      formData.append('capture_type', 'focused');
+      formData.append('region', JSON.stringify(region));
+
+      const uploadUrl = `${this.backendUrl}/api/vision/jobs`;
+
+      const token = authStore.getAccessToken();
+      const headers = formData.getHeaders();
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const startTime = Date.now();
+      const response = await axios.post(uploadUrl, formData, {
+        headers: headers,
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity
+      });
+
+      const uploadTime = Date.now() - startTime;
+      const result = response.data;
+
+      console.log(`📸 [VisionScheduler] ✅ Focused vision job queued (${uploadTime}ms)`);
+      console.log(`   - Job ID: ${result.job_id || 'N/A'}`);
+      console.log(`   - Region: ${region.width}x${region.height}`);
+
+    } catch (error) {
+      console.error('📸 [VisionScheduler] ❌ Failed to queue focused vision job:', error.message);
     }
   }
 }

@@ -415,12 +415,17 @@ class ComprehensiveActivityTracker {
     if (!events || events.length === 0) return;
 
     // Double-check vision state before sending
-    if (this.visionScheduler && !this.visionScheduler.globalVisionEnabled) {
+    if (!this.visionScheduler) {
+      console.log('🚫 [ActivityTracker.sendEventsToBackend] visionScheduler not initialized, not sending events');
+      return;
+    }
+
+    if (!this.visionScheduler.globalVisionEnabled) {
       console.log('🚫 [ActivityTracker.sendEventsToBackend] Vision disabled, not sending events');
       return;
     }
 
-    console.log(`📤 [ActivityTracker.sendEventsToBackend] Sending ${events.length} events (Vision: ${this.visionScheduler ? this.visionScheduler.globalVisionEnabled : 'unknown'})`);
+    console.log(`📤 [ActivityTracker.sendEventsToBackend] Sending ${events.length} events (Vision: true)`);
 
     try {
       const transformedEvents = events.map((event) => ({

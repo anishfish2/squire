@@ -94,12 +94,23 @@ class ActionExecutor:
     ) -> str:
         """Queue an action in the database"""
         try:
+            # Validate suggestion_id is a valid UUID format, otherwise set to None
+            valid_suggestion_id = None
+            if suggestion_id:
+                try:
+                    UUID(suggestion_id)  # This will raise ValueError if not a valid UUID
+                    valid_suggestion_id = suggestion_id
+                    print(f"✅ Valid UUID for suggestion_id: {suggestion_id}")
+                except ValueError:
+                    print(f"⚠️ Invalid UUID format for suggestion_id: {suggestion_id}, setting to None")
+                    valid_suggestion_id = None
+
             # Call the Postgres function
             result = supabase.rpc(
                 "queue_action",
                 {
                     "p_user_id": user_id,
-                    "p_suggestion_id": suggestion_id,
+                    "p_suggestion_id": valid_suggestion_id,
                     "p_action_type": action_type,
                     "p_action_data": action_params,
                     "p_requires_approval": requires_approval,
@@ -264,7 +275,7 @@ class ActionExecutor:
 
             # Query user_oauth_tokens table
             result = supabase.table("user_oauth_tokens")\
-                .select("access_token, refresh_token, expires_at, token_type, scopes")\
+                .select("access_token, refresh_token, expires_at, scopes")\
                 .eq("user_id", user_id)\
                 .eq("provider", provider)\
                 .order("created_at", desc=True)\
@@ -273,6 +284,8 @@ class ActionExecutor:
 
             if result.data and len(result.data) > 0:
                 token_data = result.data[0]
+                # Add token_type since it's always "Bearer" for OAuth
+                token_data["token_type"] = "Bearer"
                 print(f"✅ Found credentials for {service_name} (provider: {provider})")
                 return token_data
             else:
