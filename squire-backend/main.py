@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from app.routers import ai, activity, websocket, vision, llm, auth, actions
+from app.routers import ai, activity, websocket, vision, llm, auth, actions, tools
 from app.services.websocket_manager import ws_manager
 from app.core.config import settings
 from app.core.database import supabase
@@ -64,6 +64,7 @@ app.include_router(websocket.router, prefix="/api/ws", tags=["websockets"])
 app.include_router(vision.router)
 app.include_router(llm.router)
 app.include_router(actions.router)
+app.include_router(tools.router)
 
 socket_app = socketio.ASGIApp(ws_manager.sio, app)
 

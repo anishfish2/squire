@@ -360,6 +360,7 @@ function LLMChatApp() {
   const [suggestions, setSuggestions] = useState([])
   const [expandedSuggestion, setExpandedSuggestion] = useState(null)
   const [unreadCount, setUnreadCount] = useState(0)
+  const [toolMetadata, setToolMetadata] = useState({})
 
   // Tooltip state
   const [hoveredButton, setHoveredButton] = useState(null)
@@ -390,6 +391,33 @@ function LLMChatApp() {
   useEffect(() => {
     scrollToBottom()
   }, [messages])
+
+  useEffect(() => {
+    const fetchMetadata = async () => {
+      try {
+        const token = await ipcRenderer.invoke('get-auth-token')
+        if (!token) return
+
+        const response = await fetch('http://localhost:8000/api/tools/metadata', {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        })
+
+        if (!response.ok) {
+          console.warn('⚠️ Failed to fetch tool metadata:', response.status)
+          return
+        }
+
+        const data = await response.json()
+        setToolMetadata(data.tools || {})
+      } catch (error) {
+        console.warn('⚠️ Error loading tool metadata:', error)
+      }
+    }
+
+    fetchMetadata()
+  }, [])
 
   // Mark suggestions as read when viewing suggestions tab
   useEffect(() => {
@@ -738,6 +766,7 @@ If changing the time, update BOTH start and end times, keeping the same duration
           if (!tc.arguments || tc.arguments.trim() === '') return null
 
           const args = JSON.parse(tc.arguments)
+          const metadata = toolMetadata[tc.name]
 
           if (tc.name === 'calendar_update_event') {
             // For updates, preserve event duration if LLM creates zero-duration event
@@ -763,7 +792,8 @@ If changing the time, update BOTH start and end times, keeping the same duration
                 end: endWithTimezone,
                 description: args.description,
                 location: args.location
-              }
+              },
+              tool_metadata: metadata
             }
           } else if (tc.name === 'calendar_create_event') {
             // Apply time correction and add timezone offset for CREATE operations
@@ -779,7 +809,8 @@ If changing the time, update BOTH start and end times, keeping the same duration
                 end: correctedEnd,
                 description: args.description,
                 location: args.location
-              }
+              },
+              tool_metadata: metadata
             }
           } else if (tc.name === 'calendar_list_upcoming') {
             // List upcoming events
@@ -789,7 +820,8 @@ If changing the time, update BOTH start and end times, keeping the same duration
               action_params: {
                 days: args.days || 7,
                 max_results: args.max_results || 10
-              }
+              },
+              tool_metadata: metadata
             }
           } else if (tc.name === 'calendar_search_events') {
             // Search for events
@@ -801,16 +833,63 @@ If changing the time, update BOTH start and end times, keeping the same duration
                 start_date: addTimezoneOffset(args.start_date),
                 end_date: addTimezoneOffset(args.end_date),
                 max_results: args.max_results || 10
-              }
+              },
+              tool_metadata: metadata
+            }
+          } else if (tc.name === 'gmail_send') {
+            return {
+              tool_call_id: tc.id,
+              action_type: 'gmail_send',
+              action_params: {
+                to: args.to,
+                subject: args.subject,
+                body: args.body,
+                cc: args.cc,
+                bcc: args.bcc,
+                html: args.html
+              },
+              tool_metadata: metadata
+            }
+          } else if (tc.name === 'gmail_create_draft') {
+            return {
+              tool_call_id: tc.id,
+              action_type: 'gmail_create_draft',
+              action_params: {
+                to: args.to,
+                subject: args.subject,
+                body: args.body,
+                cc: args.cc,
+                bcc: args.bcc,
+                html: args.html
+              },
+              tool_metadata: metadata
+            }
+          } else if (tc.name === 'gmail_search') {
+            return {
+              tool_call_id: tc.id,
+              action_type: 'gmail_search',
+              action_params: {
+                query: args.query,
+                max_results: args.max_results
+              },
+              tool_metadata: metadata
             }
           } else {
+            if (metadata) {
+              return {
+                tool_call_id: tc.id,
+                action_type: tc.name,
+                action_params: args,
+                tool_metadata: metadata
+              }
+            }
             console.warn(`⚠️ [executeSearchAndContinue] Unhandled tool type: ${tc.name}`)
             return null
           }
         }).filter(Boolean)
 
         // Check if ALL actions are search-only operations
-        const searchOnlyTypes = ['calendar_search_events', 'calendar_list_upcoming']
+        const searchOnlyTypes = ['calendar_search_events', 'calendar_list_upcoming', 'gmail_search']
         const allSearchOnly = continuationActionSteps.every(step =>
           searchOnlyTypes.includes(step.action_type)
         )
@@ -1201,6 +1280,8 @@ If search returns zero events, tell the user no matching events were found.`
             console.log('🔧 Parsing tool call arguments:', tc.name, tc.arguments)
             const args = JSON.parse(tc.arguments)
 
+            const metadata = toolMetadata[tc.name]
+
             if (tc.name === 'calendar_create_event') {
               // Apply time correction and add timezone offset
               const correctedStart = addTimezoneOffset(correctTimeInDatetime(args.start, userMessage.content))
@@ -1215,7 +1296,8 @@ If search returns zero events, tell the user no matching events were found.`
                   end: correctedEnd,
                   description: args.description,
                   location: args.location
-                }
+                },
+                tool_metadata: metadata
               }
             } else if (tc.name === 'calendar_search_events') {
               // Add timezone offset to search dates
@@ -1227,7 +1309,8 @@ If search returns zero events, tell the user no matching events were found.`
                   start_date: addTimezoneOffset(args.start_date),
                   end_date: addTimezoneOffset(args.end_date),
                   max_results: args.max_results
-                }
+                },
+                tool_metadata: metadata
               }
             } else if (tc.name === 'calendar_update_event') {
               // For updates, preserve event duration if LLM creates zero-duration event
@@ -1253,7 +1336,22 @@ If search returns zero events, tell the user no matching events were found.`
                   end: endWithTimezone,
                   description: args.description,
                   location: args.location
-                }
+                },
+                tool_metadata: metadata
+              }
+            } else if (tc.name === 'gmail_send') {
+              return {
+                tool_call_id: tc.id,
+                action_type: 'gmail_send',
+                action_params: {
+                  to: args.to,
+                  subject: args.subject,
+                  body: args.body,
+                  cc: args.cc,
+                  bcc: args.bcc,
+                  html: args.html
+                },
+                tool_metadata: metadata
               }
             } else if (tc.name === 'gmail_create_draft') {
               return {
@@ -1262,8 +1360,22 @@ If search returns zero events, tell the user no matching events were found.`
                 action_params: {
                   to: args.to,
                   subject: args.subject,
-                  body: args.body
-                }
+                  body: args.body,
+                  cc: args.cc,
+                  bcc: args.bcc,
+                  html: args.html
+                },
+                tool_metadata: metadata
+              }
+            } else if (tc.name === 'gmail_search') {
+              return {
+                tool_call_id: tc.id,
+                action_type: 'gmail_search',
+                action_params: {
+                  query: args.query,
+                  max_results: args.max_results
+                },
+                tool_metadata: metadata
               }
             } else if (tc.name === 'calendar_list_upcoming') {
               return {
@@ -1272,7 +1384,8 @@ If search returns zero events, tell the user no matching events were found.`
                 action_params: {
                   days: args.days || 7,
                   max_results: args.max_results || 10
-                }
+                },
+                tool_metadata: metadata
               }
             } else if (tc.name === 'calendar_create_recurring') {
               // Apply time correction and add timezone offset
@@ -1289,7 +1402,8 @@ If search returns zero events, tell the user no matching events were found.`
                   recurrence_rule: args.recurrence_rule,
                   description: args.description,
                   location: args.location
-                }
+                },
+                tool_metadata: metadata
               }
             } else if (tc.name === 'calendar_add_meet_link') {
               return {
@@ -1297,7 +1411,8 @@ If search returns zero events, tell the user no matching events were found.`
                 action_type: 'calendar_add_meet_link',
                 action_params: {
                   event_id: args.event_id
-                }
+                },
+                tool_metadata: metadata
               }
             } else if (tc.name === 'calendar_set_reminders') {
               return {
@@ -1306,7 +1421,8 @@ If search returns zero events, tell the user no matching events were found.`
                 action_params: {
                   event_id: args.event_id,
                   reminders: args.reminders
-                }
+                },
+                tool_metadata: metadata
               }
             } else if (tc.name === 'calendar_add_attendees') {
               return {
@@ -1315,7 +1431,15 @@ If search returns zero events, tell the user no matching events were found.`
                 action_params: {
                   event_id: args.event_id,
                   attendees: args.attendees
-                }
+                },
+                tool_metadata: metadata
+              }
+            } else if (metadata) {
+              return {
+                tool_call_id: tc.id,
+                action_type: tc.name,
+                action_params: args,
+                tool_metadata: metadata
               }
             }
             return null

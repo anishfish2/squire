@@ -120,13 +120,17 @@ class GmailAgent(BaseAgent):
 
             self.log(f"Sent email to {to}")
 
+            thread_id = sent_message.get('threadId')
+            web_link = f"https://mail.google.com/mail/u/0/#sent/{thread_id}" if thread_id else None
+
             return ActionResult(
                 success=True,
                 data={
                     "message_id": sent_message.get('id'),
-                    "thread_id": sent_message.get('threadId'),
+                    "thread_id": thread_id,
                     "to": to,
-                    "subject": subject
+                    "subject": subject,
+                    "web_link": web_link
                 },
                 metadata={
                     "sent_at": sent_message.get('internalDate')
@@ -191,13 +195,18 @@ class GmailAgent(BaseAgent):
 
             self.log(f"Created draft for {to}")
 
+            draft_id = draft.get('id')
+            message_id = draft.get('message', {}).get('id')
+            web_link = f"https://mail.google.com/mail/u/0/#drafts/{draft_id}" if draft_id else None
+
             return ActionResult(
                 success=True,
                 data={
-                    "draft_id": draft.get('id'),
-                    "message_id": draft.get('message', {}).get('id'),
+                    "draft_id": draft_id,
+                    "message_id": message_id,
                     "to": to,
-                    "subject": subject
+                    "subject": subject,
+                    "web_link": web_link
                 },
                 metadata={
                     "is_draft": True
@@ -258,7 +267,8 @@ class GmailAgent(BaseAgent):
                     "to": headers.get('To'),
                     "subject": headers.get('Subject'),
                     "date": headers.get('Date'),
-                    "snippet": msg_detail.get('snippet')
+                    "snippet": msg_detail.get('snippet'),
+                    "web_link": f"https://mail.google.com/mail/u/0/#inbox/{msg_detail.get('id')}"
                 })
 
             self.log(f"Found {len(email_list)} emails matching '{query}'")

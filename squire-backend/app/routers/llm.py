@@ -12,6 +12,23 @@ import logging
 from app.services.llm_service import llm_service
 from app.services.action_detection_service import action_detection_service
 from app.middleware.auth import get_current_user, jwt_bearer
+import app.tools  # noqa: F401 (ensure built-in tools are registered)
+from app.tools.registry import registry
+
+
+def get_openai_tools() -> List[Dict[str, Any]]:
+    """Render registered tools in OpenAI function-call format."""
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.json_schema(),
+            },
+        }
+        for tool in sorted(registry.all(), key=lambda t: t.name)
+    ]
 
 logger = logging.getLogger(__name__)
 
@@ -35,269 +52,6 @@ class ChatRequest(BaseModel):
     temperature: Optional[float] = 0.7
     max_tokens: Optional[int] = None
 
-
-# Tool definitions for GPT-4
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "calendar_create_event",
-            "description": "Create a calendar event on the user's Google Calendar",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "title": {
-                        "type": "string",
-                        "description": "The title/summary of the event"
-                    },
-                    "start": {
-                        "type": "string",
-                        "description": "Start time in ISO 8601 format (e.g., 2025-10-11T14:00:00Z)"
-                    },
-                    "end": {
-                        "type": "string",
-                        "description": "End time in ISO 8601 format (optional, defaults to 1 hour after start)"
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "Event description/notes"
-                    },
-                    "location": {
-                        "type": "string",
-                        "description": "Event location"
-                    }
-                },
-                "required": ["title", "start"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "calendar_search_events",
-            "description": "Search for calendar events by title and/or date range. Use this BEFORE updating events to find the event ID.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Search query to match against event titles (e.g., 'climbing', 'standup')"
-                    },
-                    "start_date": {
-                        "type": "string",
-                        "description": "Start of date range to search (ISO 8601 format, e.g., 2025-10-11T00:00:00Z). Defaults to today."
-                    },
-                    "end_date": {
-                        "type": "string",
-                        "description": "End of date range to search (ISO 8601 format). Defaults to 7 days from start_date."
-                    },
-                    "max_results": {
-                        "type": "integer",
-                        "description": "Maximum number of events to return (default: 10)"
-                    }
-                },
-                "required": ["query"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "calendar_update_event",
-            "description": "Update an existing calendar event. You must search for the event first using calendar_search_events to get the event_id.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "event_id": {
-                        "type": "string",
-                        "description": "The ID of the event to update (obtained from calendar_search_events)"
-                    },
-                    "title": {
-                        "type": "string",
-                        "description": "New event title (optional)"
-                    },
-                    "start": {
-                        "type": "string",
-                        "description": "New start time in ISO 8601 format (optional)"
-                    },
-                    "end": {
-                        "type": "string",
-                        "description": "New end time in ISO 8601 format (optional)"
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "New event description (optional)"
-                    },
-                    "location": {
-                        "type": "string",
-                        "description": "New event location (optional)"
-                    }
-                },
-                "required": ["event_id"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "gmail_create_draft",
-            "description": "Create an email draft in Gmail",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "to": {
-                        "type": "string",
-                        "description": "Recipient email address"
-                    },
-                    "subject": {
-                        "type": "string",
-                        "description": "Email subject"
-                    },
-                    "body": {
-                        "type": "string",
-                        "description": "Email body content"
-                    }
-                },
-                "required": ["to", "subject", "body"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "calendar_list_upcoming",
-            "description": "List upcoming calendar events in the next N days",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "days": {
-                        "type": "integer",
-                        "description": "Number of days to look ahead (default: 7)"
-                    },
-                    "max_results": {
-                        "type": "integer",
-                        "description": "Maximum number of events to return (default: 10)"
-                    }
-                },
-                "required": []
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "calendar_create_recurring",
-            "description": "Create a recurring calendar event with recurrence rules",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "title": {
-                        "type": "string",
-                        "description": "Event title"
-                    },
-                    "start": {
-                        "type": "string",
-                        "description": "First occurrence start time in ISO 8601 format"
-                    },
-                    "end": {
-                        "type": "string",
-                        "description": "First occurrence end time in ISO 8601 format"
-                    },
-                    "recurrence_rule": {
-                        "type": "string",
-                        "description": "RRULE format string. Examples: 'RRULE:FREQ=DAILY' (daily), 'RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR' (Mon/Wed/Fri), 'RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR' (weekdays), 'RRULE:FREQ=MONTHLY;BYMONTHDAY=15' (15th of each month)"
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "Event description (optional)"
-                    },
-                    "location": {
-                        "type": "string",
-                        "description": "Event location (optional)"
-                    }
-                },
-                "required": ["title", "start", "recurrence_rule"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "calendar_add_meet_link",
-            "description": "Add a Google Meet video conference link to an existing calendar event. You must search for the event first to get the event_id.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "event_id": {
-                        "type": "string",
-                        "description": "The ID of the event to add Google Meet link to (obtained from calendar_search_events)"
-                    }
-                },
-                "required": ["event_id"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "calendar_set_reminders",
-            "description": "Set custom reminders for a calendar event. You must search for the event first to get the event_id.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "event_id": {
-                        "type": "string",
-                        "description": "The ID of the event to set reminders for (obtained from calendar_search_events)"
-                    },
-                    "reminders": {
-                        "type": "array",
-                        "description": "Array of reminder objects. Each object has 'method' (email or popup) and 'minutes' (minutes before event)",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "method": {
-                                    "type": "string",
-                                    "enum": ["email", "popup"],
-                                    "description": "Reminder method"
-                                },
-                                "minutes": {
-                                    "type": "integer",
-                                    "description": "Minutes before event to send reminder"
-                                }
-                            },
-                            "required": ["method", "minutes"]
-                        }
-                    }
-                },
-                "required": ["event_id", "reminders"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "calendar_add_attendees",
-            "description": "Add attendees/guests to an existing calendar event. You must search for the event first to get the event_id.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "event_id": {
-                        "type": "string",
-                        "description": "The ID of the event to add attendees to (obtained from calendar_search_events)"
-                    },
-                    "attendees": {
-                        "type": "array",
-                        "description": "Array of email addresses to invite",
-                        "items": {
-                            "type": "string"
-                        }
-                    }
-                },
-                "required": ["event_id", "attendees"]
-            }
-        }
-    }
-]
 
 
 async def generate_stream(request: ChatRequest):
@@ -348,9 +102,13 @@ async def generate_stream(request: ChatRequest):
         if request.max_tokens is not None:
             kwargs['max_tokens'] = request.max_tokens
 
+        if 'gpt' in request.model.lower():
+            kwargs['tools'] = get_openai_tools()
+            kwargs['tool_choice'] = 'auto'
+
         # Add tools for GPT models (OpenAI function calling)
         if 'gpt' in request.model.lower():
-            kwargs['tools'] = TOOLS
+            kwargs['tools'] = get_openai_tools()
             kwargs['tool_choice'] = 'auto'
 
         # Stream the response

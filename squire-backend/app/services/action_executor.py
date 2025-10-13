@@ -9,6 +9,8 @@ from datetime import datetime
 from app.core.database import supabase
 from app.agents.base_agent import BaseAgent, ActionResult, AgentError
 from app.agents.gsuite.gmail_agent import GmailAgent
+import app.tools  # ensure registry is populated
+from app.tools.formatters import as_action_metadata
 # Use optimized version for better performance
 try:
     from app.agents.gsuite.calendar_agent_optimized import OptimizedCalendarAgent as CalendarAgent
@@ -62,14 +64,31 @@ class ActionExecutor:
         """
         results = []
 
+        metadata = as_action_metadata()
+
         for step in action_steps:
             try:
+                action_type = step.get("action_type")
+                action_params = step.get("action_params", {})
+
+                # Validate against registry metadata if available
+                tool_meta = metadata.get(action_type)
+                if tool_meta:
+                    missing = [
+                        param for param in tool_meta["required_parameters"]
+                        if param not in action_params
+                    ]
+                    if missing:
+                        raise ValueError(
+                            f"Missing required parameters for {action_type}: {missing}"
+                        )
+
                 # Queue the action
                 action_id = await self._queue_action(
                     user_id=user_id,
                     suggestion_id=suggestion_id,
-                    action_type=step.get("action_type"),
-                    action_params=step.get("action_params", {}),
+                    action_type=action_type,
+                    action_params=action_params,
                     requires_approval=step.get("requires_approval", True),
                     priority=step.get("priority", 5)
                 )
@@ -169,6 +188,7 @@ class ActionExecutor:
             action_data = action.data
             action_type = action_data["action_type"]
             action_params = action_data["action_data"]
+            metadata = as_action_metadata()
 
             # Update status to executing
             supabase.rpc(
@@ -188,6 +208,10 @@ class ActionExecutor:
             # Execute via agent
             print(f"🚀 Executing action {action_id} via {agent.service_name}")
             result = await agent.execute(action_type, action_params)
+
+            tool_meta = metadata.get(action_type)
+            if tool_meta:
+                result.metadata.setdefault("tool", tool_meta)
 
             # Update action status
             if result.success:

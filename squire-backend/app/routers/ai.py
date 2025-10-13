@@ -17,6 +17,8 @@ from app.services.keystroke_analysis_service import KeystrokeAnalysisService
 from app.services.ocr_job_manager import OCRJobManager, JobPriority
 from app.services.vision_job_manager import vision_job_manager
 from app.services.action_detection_service import action_detection_service
+import app.tools  # ensure tool registry is populated
+from app.tools.formatters import as_action_metadata
 from app.models.schemas import (
     AIContextRequest,
     AIContextResponse,
@@ -2009,11 +2011,25 @@ async def process_batch_context(
             has_execution = sug.get("execution_mode") == "direct"
             print(f"   [{i+1}] '{sug.get('title', 'Untitled')}' - {'✅ HAS execution_mode' if has_execution else '❌ NO execution_mode'}")
 
+        tool_metadata = as_action_metadata()
+
         # Transform suggestions to match frontend expected format
         suggestions = []
         for sug in raw_suggestions:
             # Get the content object from LLM response
             llm_content = sug.get("content", {})
+
+            raw_steps = sug.get("action_steps") or []
+            enriched_steps = []
+            for step in raw_steps:
+                if not isinstance(step, dict):
+                    continue
+                step_copy = dict(step)
+                action_type = step_copy.get("action_type")
+                meta = tool_metadata.get(action_type)
+                if meta:
+                    step_copy["tool_metadata"] = meta
+                enriched_steps.append(step_copy)
 
             transformed = {
                 "type": sug.get("type", "general"),
@@ -2042,7 +2058,7 @@ async def process_batch_context(
             # ✅ Check if LLM returned tool calls (execution_mode: "direct")
             if sug.get("execution_mode") == "direct" and sug.get("action_steps"):
                 transformed["execution_mode"] = "direct"
-                transformed["action_steps"] = sug.get("action_steps", [])
+                transformed["action_steps"] = enriched_steps
                 print(f"   🎯 LLM suggested direct action: {sug.get('title')}")
                 print(f"      Action steps: {len(sug.get('action_steps', []))}")
 
