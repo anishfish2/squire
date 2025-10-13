@@ -9,7 +9,12 @@ from datetime import datetime
 from app.core.database import supabase
 from app.agents.base_agent import BaseAgent, ActionResult, AgentError
 from app.agents.gsuite.gmail_agent import GmailAgent
-from app.agents.gsuite.calendar_agent import CalendarAgent
+# Use optimized version for better performance
+try:
+    from app.agents.gsuite.calendar_agent_optimized import OptimizedCalendarAgent as CalendarAgent
+except ImportError:
+    # Fallback to original if optimized doesn't exist
+    from app.agents.gsuite.calendar_agent import CalendarAgent
 
 
 class ActionExecutor:
@@ -31,6 +36,11 @@ class ActionExecutor:
             "calendar_update_event": CalendarAgent,
             "calendar_delete_event": CalendarAgent,
             "calendar_get_availability": CalendarAgent,
+            "calendar_list_upcoming": CalendarAgent,
+            "calendar_create_recurring": CalendarAgent,
+            "calendar_add_meet_link": CalendarAgent,
+            "calendar_set_reminders": CalendarAgent,
+            "calendar_add_attendees": CalendarAgent,
         }
 
     async def execute_direct_actions(
@@ -251,6 +261,7 @@ class ActionExecutor:
     ) -> Optional[Dict[str, Any]]:
         """
         Get user's OAuth credentials for a service
+        Automatically refreshes expired tokens
 
         Args:
             user_id: User ID
@@ -283,18 +294,72 @@ class ActionExecutor:
                 .limit(1)\
                 .execute()
 
-            if result.data and len(result.data) > 0:
-                token_data = result.data[0]
-                # Add token_type since it's always "Bearer" for OAuth
-                token_data["token_type"] = "Bearer"
-                print(f"✅ Found credentials for {service_name} (provider: {provider})")
-                return token_data
-            else:
+            if not result.data or len(result.data) == 0:
                 print(f"⚠️ No credentials found for user {user_id}, provider {provider}")
                 return None
 
+            token_data = result.data[0]
+
+            # Check if token is expired and refresh if needed
+            if token_data.get("expires_at"):
+                from datetime import datetime
+                import re
+                # Remove timezone info for comparison (both should be naive)
+                expires_at_str = token_data["expires_at"]
+                # Handle both ISO formats with and without timezone
+                if expires_at_str.endswith('Z'):
+                    expires_at_str = expires_at_str[:-1]
+                elif '+' in expires_at_str:
+                    # Has timezone offset like +00:00, strip it
+                    expires_at_str = expires_at_str.split('+')[0]
+                elif re.search(r'T.*-\d{2}:\d{2}$', expires_at_str):
+                    # Has negative timezone offset like -07:00 at the end
+                    # Only strip the timezone part after the time
+                    expires_at_str = re.sub(r'-\d{2}:\d{2}$', '', expires_at_str)
+
+                expires_at = datetime.fromisoformat(expires_at_str)
+                now = datetime.utcnow()
+
+                # If token is expired, refresh it
+                if expires_at <= now:
+                    print(f"🔄 Token expired for {service_name}, refreshing...")
+
+                    if provider == "google" and token_data.get("refresh_token"):
+                        # Refresh Google OAuth token
+                        from app.services.google_oauth import google_oauth_service
+                        new_tokens = await google_oauth_service.refresh_access_token(
+                            token_data["refresh_token"]
+                        )
+
+                        # Update token in database
+                        expires_in = new_tokens.get("expires_in", 3600)
+                        new_expires_at = datetime.utcnow().timestamp() + expires_in
+
+                        supabase.table("user_oauth_tokens")\
+                            .update({
+                                "access_token": new_tokens["access_token"],
+                                "expires_at": datetime.fromtimestamp(new_expires_at).isoformat(),
+                                "updated_at": datetime.utcnow().isoformat()
+                            })\
+                            .eq("user_id", user_id)\
+                            .eq("provider", provider)\
+                            .execute()
+
+                        token_data["access_token"] = new_tokens["access_token"]
+                        print(f"✅ Refreshed token for {service_name}")
+                    else:
+                        print(f"⚠️ Cannot refresh token - no refresh_token available")
+                        return None
+
+            # Add token_type since it's always "Bearer" for OAuth
+            token_data["token_type"] = "Bearer"
+            print(f"✅ Found credentials for {service_name} (provider: {provider})")
+            return token_data
+
         except Exception as e:
             print(f"❌ Error getting credentials: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
 

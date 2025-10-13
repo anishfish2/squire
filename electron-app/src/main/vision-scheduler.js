@@ -79,6 +79,11 @@ class VisionScheduler {
     }
   }
 
+  getPreference(appName) {
+    if (!appName) return null;
+    return this.appPreferences.get(appName.toLowerCase()) || null;
+  }
+
   /**
    * Start vision capture scheduling
    */
@@ -208,7 +213,7 @@ class VisionScheduler {
     }
 
     // Get preference (will return defaults if not set)
-    let pref = this.appPreferences.get(this.currentApp.toLowerCase());
+    let pref = this.getPreference(this.currentApp);
 
     if (!pref) {
       // Get default from preferences manager
@@ -241,7 +246,7 @@ class VisionScheduler {
     }
 
     // Otherwise use preferences from backend
-    const pref = this.appPreferences.get(this.currentApp);
+    const pref = this.getPreference(this.currentApp);
 
     if (!pref || !pref.vision_frequency) {
       return this.intervals.normal;
@@ -334,7 +339,7 @@ class VisionScheduler {
    */
   async queueVisionJob(screenshotBuffer) {
     try {
-      const pref = this.appPreferences.get(this.currentApp);
+      const pref = this.getPreference(this.currentApp);
       const allowScreenshots = pref?.allow_screenshots || false;
 
 
@@ -452,7 +457,7 @@ class VisionScheduler {
       return this.focusedIntervals.high; // 3 seconds
     }
 
-    const pref = this.appPreferences.get(this.currentApp);
+    const pref = this.getPreference(this.currentApp);
     if (!pref || !pref.vision_frequency) {
       return this.focusedIntervals.normal;
     }
@@ -529,7 +534,7 @@ class VisionScheduler {
    */
   async queueFocusedVisionJob(screenshotBuffer, region) {
     try {
-      const pref = this.appPreferences.get(this.currentApp);
+      const pref = this.getPreference(this.currentApp);
       const allowScreenshots = pref?.allow_screenshots || false;
 
       const formData = new FormData();

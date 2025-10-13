@@ -415,7 +415,7 @@ Only include insights with confidence > 0.6. Return empty arrays if no clear ins
 
             try:
                 response = client.chat.completions.create(
-                    model="gpt-4o-mini",
+                    model="gpt-5",
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.3,
                     max_tokens=500,
@@ -567,7 +567,11 @@ Only include insights with confidence > 0.6. Return empty arrays if no clear ins
                 return
 
             context_data = job.get("context_data", {})
-            user_id = context_data.get("user_id") or "550e8400-e29b-41d4-a716-446655440000"
+            user_id = context_data.get("user_id")
+
+            if not user_id:
+                print("⚠️ Missing user_id for OCR job completion event; skipping websocket emit")
+                return
 
             job_data = {
                 "job_id": job["id"],
@@ -616,4 +620,3 @@ Only include insights with confidence > 0.6. Return empty arrays if no clear ins
             }
         except Exception as e:
             return {}
-

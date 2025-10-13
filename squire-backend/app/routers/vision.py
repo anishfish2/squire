@@ -43,11 +43,17 @@ class AppPreferenceResponse(BaseModel):
 # Endpoints
 
 @router.get("/preferences/{user_id}")
-async def get_user_preferences(user_id: str):
+async def get_user_preferences(
+    user_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     """
     Get all app preferences for a user
     """
     try:
+        if current_user["id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to access preferences")
+
         print(f"\n📋 [VisionRouter] GET USER PREFERENCES for user: {user_id}")
 
         result = supabase.table("user_app_preferences")\
@@ -67,11 +73,18 @@ async def get_user_preferences(user_id: str):
 
 
 @router.get("/preferences/{user_id}/{app_name}")
-async def get_app_preference(user_id: str, app_name: str):
+async def get_app_preference(
+    user_id: str,
+    app_name: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     """
     Get preference for a specific app
     """
     try:
+        if current_user["id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to access preferences")
+
         result = supabase.table("user_app_preferences")\
             .select("*")\
             .eq("user_id", user_id)\
@@ -98,16 +111,24 @@ async def get_app_preference(user_id: str, app_name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.put("/preferences/{user_id}/{app_name}")
+@router.put(
+    "/preferences/{user_id}/{app_name}",
+    dependencies=[Depends(jwt_bearer)]
+)
 async def update_app_preference(
     user_id: str,
     app_name: str,
-    updates: AppPreferenceUpdate
+    updates: AppPreferenceUpdate,
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     Update or create preference for a specific app
     """
     try:
+        auth_user_id = current_user["id"]
+        if auth_user_id != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to modify preferences")
+
         print(f"\n{'='*60}")
         print(f"📝 [VisionRouter] UPDATE APP PREFERENCE")
         print(f"   User ID: {user_id}")
@@ -118,7 +139,7 @@ async def update_app_preference(
         # Check if preference exists
         existing = supabase.table("user_app_preferences")\
             .select("*")\
-            .eq("user_id", user_id)\
+            .eq("user_id", auth_user_id)\
             .eq("app_name", app_name)\
             .execute()
 
@@ -131,7 +152,7 @@ async def update_app_preference(
 
         if not existing.data:
             # Create new preference
-            update_data["user_id"] = user_id
+            update_data["user_id"] = auth_user_id
             update_data["app_name"] = app_name
             update_data["created_at"] = datetime.utcnow().isoformat()
 
@@ -163,7 +184,7 @@ async def update_app_preference(
 
             result = supabase.table("user_app_preferences")\
                 .update(update_data)\
-                .eq("user_id", user_id)\
+                .eq("user_id", auth_user_id)\
                 .eq("app_name", app_name)\
                 .execute()
 
@@ -179,15 +200,26 @@ async def update_app_preference(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/preferences/{user_id}/{app_name}")
-async def delete_app_preference(user_id: str, app_name: str):
+@router.delete(
+    "/preferences/{user_id}/{app_name}",
+    dependencies=[Depends(jwt_bearer)]
+)
+async def delete_app_preference(
+    user_id: str,
+    app_name: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     """
     Delete preference for a specific app (revert to defaults)
     """
     try:
+        auth_user_id = current_user["id"]
+        if auth_user_id != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to modify preferences")
+
         result = supabase.table("user_app_preferences")\
             .delete()\
-            .eq("user_id", user_id)\
+            .eq("user_id", auth_user_id)\
             .eq("app_name", app_name)\
             .execute()
 

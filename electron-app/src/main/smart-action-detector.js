@@ -68,6 +68,11 @@ class SmartActionDetector {
     }
 
     console.log('✨ [SmartActionDetector] Initialized')
+
+    this.activeWindowCache = null
+    this.lastWindowCheck = 0
+    this.windowCachePromise = null
+    this.WINDOW_CACHE_DURATION = 200
   }
 
   start() {
@@ -99,7 +104,28 @@ class SmartActionDetector {
 
     // Get current active app
     try {
-      const activeWindow = await activeWin()
+      let activeWindow = null
+
+      if (this.windowCachePromise) {
+        activeWindow = await this.windowCachePromise
+      } else if ((now - this.lastWindowCheck) <= this.WINDOW_CACHE_DURATION && this.activeWindowCache) {
+        activeWindow = this.activeWindowCache
+      } else {
+        this.windowCachePromise = activeWin()
+          .then(winInfo => {
+            this.activeWindowCache = winInfo
+            this.lastWindowCheck = Date.now()
+            this.windowCachePromise = null
+            return winInfo
+          })
+          .catch(err => {
+            this.windowCachePromise = null
+            throw err
+          })
+
+        activeWindow = await this.windowCachePromise
+      }
+
       if (!activeWindow || !activeWindow.owner) return
 
       const appName = activeWindow.owner.name.toLowerCase()

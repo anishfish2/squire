@@ -163,7 +163,7 @@ Provide a detailed 3-4 sentence summary with concrete specifics."""
 
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.2,
             max_tokens=250
@@ -209,7 +209,7 @@ Return only the JSON object, no other text."""
 
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=200,
@@ -326,7 +326,7 @@ Return JSON with immediate context:
 
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5",
             messages=[
                 {
                     "role": "system",
@@ -409,7 +409,7 @@ Return JSON:
 
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5",
             messages=[
                 {
                     "role": "system",
@@ -509,7 +509,7 @@ class SequenceMetadata(BaseModel):
     workflow_pattern: str
 
 class BatchContextRequest(BaseModel):
-    user_id: str
+    user_id: Optional[str] = None
     session_id: str
     sequence_metadata: SequenceMetadata
     app_sequence: List[AppSequenceItem]
@@ -1921,19 +1921,32 @@ async def queue_ocr_with_context(
 
 
 @router.post("/batch-context")
-async def process_batch_context(request: BatchContextRequest):
+async def process_batch_context(
+    batch_request: BatchContextRequest,
+    http_request: Request,
+    _token: str = Depends(jwt_bearer)
+):
     """Process batch context analysis with app sequence and generate suggestions"""
     try:
+        user_id = getattr(http_request.state, "user_id", None)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Authentication required")
+
+        if batch_request.user_id and batch_request.user_id != user_id:
+            raise HTTPException(status_code=403, detail="User mismatch in request payload")
 
         # Get user history for personalization
-        user_history = await get_user_history(UUID(request.user_id)) if request.user_id else None
+        try:
+            user_history = await get_user_history(UUID(user_id))
+        except Exception:
+            user_history = None
 
         # 📝 EXTRACT MEANINGFUL CONTEXT from OCR if not provided
         print(f"\n{'='*60}")
         print(f"📝 [AI] EXTRACTING MEANINGFUL CONTEXT FROM OCR")
-        print(f"   Processing {len(request.app_sequence)} apps")
+        print(f"   Processing {len(batch_request.app_sequence)} apps")
 
-        for i, app in enumerate(request.app_sequence):
+        for i, app in enumerate(batch_request.app_sequence):
             if not app.meaningful_context and app.ocrText and len(app.ocrText) > 0:
                 print(f"   [{i+1}] {app.appName}: Extracting context from {len(app.ocrText)} OCR lines...")
                 try:
@@ -1961,7 +1974,7 @@ async def process_batch_context(request: BatchContextRequest):
         print(f"{'='*60}\n")
 
         # Build the LLM prompt (no raw OCR context - only meaningful summaries in prompt)
-        prompt = await build_batch_openai_prompt(request, user_history)
+        prompt = await build_batch_openai_prompt(batch_request, user_history)
 
         # Call OpenAI
         client = get_openai_client()
@@ -1970,7 +1983,7 @@ async def process_batch_context(request: BatchContextRequest):
 
 
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5",
             messages=[
                 {
                     "role": "system",
@@ -2042,8 +2055,8 @@ async def process_batch_context(request: BatchContextRequest):
         # 💾 SAVE SUGGESTIONS TO DATABASE
         print(f"\n{'='*60}")
         print(f"💾 [AI] SAVING {len(suggestions)} SUGGESTIONS TO DATABASE")
-        print(f"   User ID: {request.user_id}")
-        print(f"   Session ID: {request.session_id}")
+        print(f"   User ID: {user_id}")
+        print(f"   Session ID: {batch_request.session_id}")
 
         saved_suggestions = []
         for i, suggestion in enumerate(suggestions):
@@ -2073,8 +2086,8 @@ async def process_batch_context(request: BatchContextRequest):
                 suggestion_type = type_mapping.get(llm_type, llm_type)
 
                 suggestion_data = {
-                    "user_id": request.user_id,
-                    "session_ids": [request.session_id],  # Array of session IDs
+                    "user_id": user_id,
+                    "session_ids": [batch_request.session_id] if batch_request.session_id else [],
                     "suggestion_type": suggestion_type,  # Mapped to valid DB type
                     "suggestion_content": suggestion_content,  # JSONB with title inside
                     "confidence_score": suggestion.get("confidence_score", 0.7),
@@ -2107,8 +2120,8 @@ async def process_batch_context(request: BatchContextRequest):
 
         return {
             "suggestions": suggestions,
-            "sequence_id": request.sequence_metadata.sequence_id,
-            "request_type": request.request_type,
+            "sequence_id": batch_request.sequence_metadata.sequence_id,
+            "request_type": batch_request.request_type,
             "saved_count": len(saved_suggestions)
         }
 

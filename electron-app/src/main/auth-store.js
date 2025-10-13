@@ -188,7 +188,6 @@ class AuthStore {
   getAccessToken() {
     try {
       if (this.accessToken) {
-        console.log('✅ [AuthStore] Returning cached token:', this.accessToken.substring(0, 20) + '...');
         return this.accessToken;
       }
 

@@ -13,8 +13,20 @@ import VisionScheduler from './vision-scheduler.js'
 import SmartActionDetector from './smart-action-detector.js'
 import ContentChangeDetector from './content-change-detector.js'
 import preferencesManager from './preferences-manager.js'
+import fs from 'fs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+// In development, check if we're running from out/main (built by electron-vite)
+// If the renderer dist folder doesn't exist, we're in dev mode with dev server
+const rendererDistPath = path.join(__dirname, '../renderer')
+const isDevMode = !fs.existsSync(rendererDistPath) || !fs.existsSync(path.join(rendererDistPath, 'debug/index.html'))
+
+if (isDevMode && !process.env.VITE_DEV_SERVER_URL) {
+  // Set default dev server URL if not already set
+  process.env.VITE_DEV_SERVER_URL = 'http://localhost:5173'
+  console.log('🔧 [Dev Mode] Set VITE_DEV_SERVER_URL to', process.env.VITE_DEV_SERVER_URL)
+}
 
 let mainWindow;
 let debugWindow;
@@ -1232,13 +1244,37 @@ async function processKeystrokeSequence(sequenceData) {
 
 async function createUserSession() {
   try {
+    if (!authStore.isAuthenticated()) {
+      console.warn('⚠️ [Session] Skipping session creation – user not authenticated');
+      return;
+    }
+
+    try {
+      await authStore.checkAndRefreshToken();
+    } catch (refreshError) {
+      console.error('❌ Failed to refresh token before session creation:', refreshError);
+      return;
+    }
+
+    const token = authStore.getAccessToken();
+    const user = authStore.getUser();
+
+    if (!token || !user?.id) {
+      console.error('❌ Unable to create user session without authentication');
+      return;
+    }
+
+    currentUserId = user.id;
+
+    const authHeaders = {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${token}`
+    };
 
     try {
       const existingSessionResponse = await fetch(`http://127.0.0.1:8000/api/activity/current-session/${currentUserId}`, {
         method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { ...authHeaders },
       });
 
       if (existingSessionResponse.ok) {
@@ -1247,9 +1283,7 @@ async function createUserSession() {
         try {
           await fetch(`http://127.0.0.1:8000/api/activity/end-session/${existingResult.session_id}`, {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
+            headers: { ...authHeaders },
           });
         } catch (endError) {
         }
@@ -1260,22 +1294,23 @@ async function createUserSession() {
     currentSessionId = generateUUID();
 
     try {
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+      const fullName = user?.metadata?.name || user?.email || `User ${currentUserId.slice(0, 8)}`;
+
       const profileData = {
         id: currentUserId,
-        email: `user_${currentUserId.slice(0, 8)}@example.com`,
-        full_name: `User ${currentUserId.slice(0, 8)}`,
+        email: user?.email || '',
+        full_name: fullName,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         last_active: new Date().toISOString(),
         subscription_tier: "free",
-        timezone: "UTC"
+        timezone: timezone
       };
 
       const profileResponse = await fetch("http://127.0.0.1:8000/api/activity/profiles", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { ...authHeaders },
         body: JSON.stringify(profileData),
       });
 
@@ -1305,9 +1340,7 @@ async function createUserSession() {
 
     const sessionResponse = await fetch("http://127.0.0.1:8000/api/activity/sessions", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { ...authHeaders },
       body: JSON.stringify(sessionData),
     });
 
@@ -1403,7 +1436,6 @@ ipcMain.handle('auth-check', async () => {
 
 ipcMain.handle('get-auth-token', async () => {
   const token = authStore.getAccessToken()
-  console.log('🔑 [IPC] get-auth-token called, returning:', token ? `${token.substring(0, 20)}...` : 'null')
   return token
 })
 
@@ -1546,11 +1578,15 @@ function setupPipelines() {
   });
 
   if (currentUserId && currentSessionId) {
-    ocrManager.connectWebSocket(currentUserId, currentSessionId).then((connected) => {
-      if (connected) {
-      } else {
-      }
-    });
+    ocrManager.connectWebSocket(currentUserId, currentSessionId)
+      .then((connected) => {
+        if (!connected) {
+          console.warn('⚠️ [Main] WebSocket connection not established; OCR updates may be delayed');
+        }
+      })
+      .catch((error) => {
+        console.error('❌ [Main] Failed to connect OCR WebSocket:', error);
+      });
   }
 
   aiAssistant = new AIAssistant();
@@ -2042,6 +2078,10 @@ ipcMain.on("toggle-llm-chat", (event, show) => {
         settingsDotWindow.hide();
         settingsDotWindow.setAlwaysOnTop(false);
       }
+      if (quitDotWindow && !quitDotWindow.isDestroyed()) {
+        quitDotWindow.hide();
+        quitDotWindow.setAlwaysOnTop(false);
+      }
 
       // THEN: Show chat window at highest level
       llmChatWindow.setAlwaysOnTop(true, "pop-up-menu");
@@ -2074,6 +2114,10 @@ ipcMain.on("toggle-llm-chat", (event, show) => {
         if (settingsDotWindow && !settingsDotWindow.isDestroyed()) {
           settingsDotWindow.setAlwaysOnTop(true, "screen-saver");
           settingsDotWindow.show();
+        }
+        if (quitDotWindow && !quitDotWindow.isDestroyed()) {
+          quitDotWindow.setAlwaysOnTop(true, "screen-saver");
+          quitDotWindow.show();
         }
       } else {
         // If hub is collapsed, arrange dots horizontally
@@ -2732,6 +2776,3 @@ ipcMain.on('toggle-hub-expansion', async (event, shouldExpand) => {
     await collapseHub();
   }
 });
-
-
-

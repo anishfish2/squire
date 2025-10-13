@@ -113,6 +113,25 @@ const addTimezoneOffset = (datetimeStr) => {
       ? `+${String(timezoneOffset).padStart(2, '0')}:00`
       : `-${String(Math.abs(timezoneOffset)).padStart(2, '0')}:00`
 
+    // Check if it's a date-only format (YYYY-MM-DD)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(datetimeStr)) {
+      // Add time component for date-only strings
+      const withTimezone = `${datetimeStr}T00:00:00${timezoneOffsetStr}`
+      console.log(`🕐 [Timezone] Date-only, added time and offset: ${datetimeStr} → ${withTimezone}`)
+      return withTimezone
+    }
+
+    // For datetime strings, ensure 'T' separator exists
+    if (!datetimeStr.includes('T')) {
+      // Replace any incorrect separator with 'T'
+      datetimeStr = datetimeStr.replace(/(\d{4}-\d{2}-\d{2})[\s-](\d{2}:\d{2})/, '$1T$2')
+    }
+
+    // Ensure seconds are present
+    if (/T\d{2}:\d{2}$/.test(datetimeStr)) {
+      datetimeStr += ':00'
+    }
+
     // Append timezone offset
     const withTimezone = `${datetimeStr}${timezoneOffsetStr}`
     console.log(`🕐 [Timezone] Added offset: ${datetimeStr} → ${withTimezone}`)
@@ -121,6 +140,123 @@ const addTimezoneOffset = (datetimeStr) => {
   } catch (error) {
     console.error('❌ [Timezone] Error adding offset:', error)
     return datetimeStr
+  }
+}
+
+// Helper to get ISO-like local date string (YYYY-MM-DD) in user's timezone
+const getLocalDateString = (date) => {
+  const d = date instanceof Date ? new Date(date.getTime()) : new Date(date)
+  const localDate = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+  return localDate.toISOString().split('T')[0]
+}
+
+// Helper to build consistent date/time context for prompts
+const getCurrentDateTimeContext = () => {
+  const now = new Date()
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+  const offsetMinutes = now.getTimezoneOffset()
+  const absMinutes = Math.abs(offsetMinutes)
+  const sign = offsetMinutes <= 0 ? '+' : '-'
+  const offsetHours = String(Math.floor(absMinutes / 60)).padStart(2, '0')
+  const offsetMins = String(absMinutes % 60).padStart(2, '0')
+  const timezoneOffset = `${sign}${offsetHours}:${offsetMins}`
+  const localDate = getLocalDateString(now)
+  const localTime24 = now.toLocaleTimeString('en-GB', {
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  })
+
+  return {
+    now,
+    timezone,
+    timezoneOffsetMinutes: offsetMinutes,
+    timezoneOffset,
+    localDate,
+    localTime24
+  }
+}
+
+const getRelativeLocalDateString = (daysOffset) => {
+  const now = new Date()
+  now.setDate(now.getDate() + daysOffset)
+  return getLocalDateString(now)
+}
+
+// Helper function to preserve event duration when updating
+const preserveEventDuration = (eventId, start, end, searchResults) => {
+  if (!start || !end) return { start, end }
+
+  try {
+    // Check if start and end are the same (zero duration - likely LLM error)
+    const startDate = new Date(start)
+    const endDate = new Date(end)
+
+    if (startDate.getTime() === endDate.getTime()) {
+      console.log('⚠️ [Duration] Zero-duration event detected, attempting to preserve original duration')
+
+      // Find the original event in search results
+      if (!searchResults || searchResults.length === 0) {
+        console.log('⚠️ [Duration] No search results available, defaulting to 1 hour')
+        // Default to 1 hour duration
+        const newEnd = new Date(startDate.getTime() + 60 * 60 * 1000)
+        return {
+          start,
+          end: newEnd.toISOString().split('.')[0]  // Remove milliseconds
+        }
+      }
+
+      // Find the event in search results
+      let originalEvent = null
+      for (const result of searchResults) {
+        if (!result || !result.data) continue
+
+        const eventsArray = Array.isArray(result.data)
+          ? result.data
+          : Array.isArray(result.data.events)
+            ? result.data.events
+            : []
+
+        originalEvent = eventsArray.find(event => event.event_id === eventId)
+        if (originalEvent) break
+      }
+
+      if (!originalEvent) {
+        console.log('⚠️ [Duration] Original event not found in search results, defaulting to 1 hour')
+        const newEnd = new Date(startDate.getTime() + 60 * 60 * 1000)
+        return {
+          start,
+          end: newEnd.toISOString().split('.')[0]
+        }
+      }
+
+      // Calculate original duration
+      const origStart = new Date(originalEvent.start)
+      const origEnd = new Date(originalEvent.end)
+      const durationMs = origEnd.getTime() - origStart.getTime()
+
+      console.log(`✅ [Duration] Found original event with duration: ${durationMs / 1000 / 60} minutes`)
+
+      // Apply duration to new start time
+      const newEnd = new Date(startDate.getTime() + durationMs)
+      const newEndStr = newEnd.toISOString().split('.')[0]  // Remove milliseconds
+
+      console.log(`✅ [Duration] Preserved duration: ${start} → ${newEndStr}`)
+
+      return {
+        start,
+        end: newEndStr
+      }
+    }
+
+    // If not zero-duration, return as-is
+    console.log('✓ [Duration] Event has non-zero duration, no adjustment needed')
+    return { start, end }
+
+  } catch (error) {
+    console.error('❌ [Duration] Error preserving duration:', error)
+    return { start, end }
   }
 }
 
@@ -173,21 +309,41 @@ const Tooltip = ({ text, hotkey, children, show }) => (
   </div>
 )
 
-// Available LLM models
+// Available LLM models - Updated with all models from backend
 const MODELS = [
+  // OpenAI
+  { id: 'gpt-5', name: 'GPT-5', provider: 'OpenAI' },
+  { id: 'gpt-5-codex', name: 'GPT-5 Codex', provider: 'OpenAI' },
+  { id: 'gpt-4.1', name: 'GPT-4.1', provider: 'OpenAI' },
+  { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini', provider: 'OpenAI' },
+  { id: 'gpt-4.1-nano', name: 'GPT-4.1 Nano', provider: 'OpenAI' },
+  { id: 'gpt-4o', name: 'GPT-4o (Latest)', provider: 'OpenAI' },
+  { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'OpenAI' },
   { id: 'gpt-4', name: 'GPT-4', provider: 'OpenAI' },
   { id: 'gpt-4-turbo', name: 'GPT-4 Turbo', provider: 'OpenAI' },
+  { id: 'o4-mini', name: 'O4 Mini (Reasoning)', provider: 'OpenAI' },
+  { id: 'o1-preview', name: 'O1 Preview (Reasoning)', provider: 'OpenAI' },
+  { id: 'o1-mini', name: 'O1 Mini (Reasoning)', provider: 'OpenAI' },
   { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo', provider: 'OpenAI' },
+
+  // Anthropic
   { id: 'claude-3-opus', name: 'Claude 3 Opus', provider: 'Anthropic' },
   { id: 'claude-3-sonnet', name: 'Claude 3 Sonnet', provider: 'Anthropic' },
   { id: 'claude-3-haiku', name: 'Claude 3 Haiku', provider: 'Anthropic' },
+  { id: 'claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', provider: 'Anthropic' },
+  { id: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5', provider: 'Anthropic' },
+
+  // Google Gemini
+  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', provider: 'Google' },
+  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'Google' },
+  { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', provider: 'Google' },
   { id: 'gemini-pro', name: 'Gemini Pro', provider: 'Google' },
 ]
 
 function LLMChatApp() {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
-  const [selectedModel, setSelectedModel] = useState('gpt-4o')
+  const [selectedModel, setSelectedModel] = useState('gpt-5') // Updated models list
   const [isLoading, setIsLoading] = useState(false)
   const [isHovered, setIsHovered] = useState(false)
   const messagesEndRef = useRef(null)
@@ -319,9 +475,25 @@ function LLMChatApp() {
   }, [])
 
   // Execute search actions and continue conversation
-  const executeSearchAndContinue = async (actionSteps, assistantMessageId, userMessageContent) => {
+  const executeSearchAndContinue = async (actionSteps, assistantMessageId, userMessageContent, depth = 0) => {
+    // Prevent infinite recursion
+    const MAX_DEPTH = 3
+    if (depth >= MAX_DEPTH) {
+      console.warn(`⚠️ [executeSearchAndContinue] Maximum recursion depth (${MAX_DEPTH}) reached, stopping`)
+      setMessages(prev => prev.map(msg =>
+        msg.id === assistantMessageId
+          ? {
+              ...msg,
+              content: msg.content || 'I encountered too many nested searches. Please try rephrasing your request.',
+              isStreaming: false
+            }
+          : msg
+      ))
+      return
+    }
+
     try {
-      console.log('🔍 [executeSearchAndContinue] Executing search actions:', actionSteps)
+      console.log(`🔍 [executeSearchAndContinue] Executing search actions (depth ${depth}):`, actionSteps)
 
       // Get auth token
       const authToken = await ipcRenderer.invoke('get-auth-token')
@@ -397,19 +569,32 @@ function LLMChatApp() {
       const currentMessages = messages.filter(m => m.role === 'user' || m.role === 'assistant')
 
       // Add system message with date/time context
-      const today = new Date()
-      const dateString = today.toISOString().split('T')[0]
-      const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone
-      const timezoneOffset = -today.getTimezoneOffset() / 60
-      const timezoneOffsetStr = timezoneOffset >= 0 ? `+${String(timezoneOffset).padStart(2, '0')}:00` : `-${String(Math.abs(timezoneOffset)).padStart(2, '0')}:00`
+      const {
+        now: continuationNow,
+        timezone: continuationTimezone,
+        timezoneOffset: continuationOffset,
+        localDate: continuationDate,
+        localTime24: continuationTime
+      } = getCurrentDateTimeContext()
+      const continuationTomorrow = getRelativeLocalDateString(1)
+      const continuationYesterday = getRelativeLocalDateString(-1)
 
       const systemMessage = {
         role: 'system',
         content: `You are a helpful AI assistant with access to Google Calendar and Gmail tools.
 
+OUTPUT FORMATTING:
+- Use rich markdown formatting for better readability
+- Format lists with clear bullet points or numbered items
+- Use **bold** for important information like event titles
+- Use tables when showing multiple events with similar data
+- Keep responses concise but informative
+- Do NOT use emojis in responses
+
 ⚠️ TIME FORMAT - SUPER SIMPLE ⚠️
-Current date: ${dateString}
-Current time: ${today.toLocaleTimeString()}
+Current date: ${continuationDate}
+Current time: ${continuationTime}
+User timezone: ${continuationTimezone} (UTC${continuationOffset})
 
 🕐 Convert times to 24-hour format (military time):
 - 6pm → 18:00
@@ -417,13 +602,13 @@ Current time: ${today.toLocaleTimeString()}
 - 2pm → 14:00
 - 10am → 10:00
 
-✅ CORRECT FORMAT: "${dateString}T<HOUR>:00:00"
+✅ CORRECT FORMAT: "${continuationDate}T<HOUR>:00:00"
 Where <HOUR> is 24-hour format (00-23)
 
 📅 DATE HANDLING:
-- "today" → ${dateString}
-- "tomorrow" → ${new Date(today.getTime() + 86400000).toISOString().split('T')[0]}
-- "yesterday" → ${new Date(today.getTime() - 86400000).toISOString().split('T')[0]}
+- "today" → ${continuationDate}
+- "tomorrow" → ${continuationTomorrow}
+- "yesterday" → ${continuationYesterday}
 
 ⚠️ CRITICAL: When updating event dates/times, you MUST update BOTH start AND end times!
 If changing the date, update the date in BOTH start and end.
@@ -548,16 +733,25 @@ If changing the time, update BOTH start and end times, keeping the same duration
         // Use the passed user message for time correction
         console.log('📝 [executeSearchAndContinue] Original user message:', userMessageContent)
 
-        // Convert to action steps
+        // Convert to action steps - handle ALL tool types
         const continuationActionSteps = continuationToolCalls.map(tc => {
           if (!tc.arguments || tc.arguments.trim() === '') return null
 
           const args = JSON.parse(tc.arguments)
 
           if (tc.name === 'calendar_update_event') {
-            // Apply time correction and add timezone offset
-            const correctedStart = addTimezoneOffset(correctTimeInDatetime(args.start, userMessageContent))
-            const correctedEnd = args.end ? addTimezoneOffset(correctTimeInDatetime(args.end, userMessageContent)) : undefined
+            // For updates, preserve event duration if LLM creates zero-duration event
+            // First, preserve duration (before adding timezone)
+            const { start: preservedStart, end: preservedEnd } = preserveEventDuration(
+              args.event_id,
+              args.start,
+              args.end,
+              data.results  // searchResults from the executed search
+            )
+
+            // Then add timezone offset
+            const startWithTimezone = addTimezoneOffset(preservedStart)
+            const endWithTimezone = preservedEnd ? addTimezoneOffset(preservedEnd) : undefined
 
             return {
               tool_call_id: tc.id,
@@ -565,14 +759,14 @@ If changing the time, update BOTH start and end times, keeping the same duration
               action_params: {
                 event_id: args.event_id,
                 title: args.title,
-                start: correctedStart,
-                end: correctedEnd,
+                start: startWithTimezone,
+                end: endWithTimezone,
                 description: args.description,
                 location: args.location
               }
             }
           } else if (tc.name === 'calendar_create_event') {
-            // Apply time correction and add timezone offset
+            // Apply time correction and add timezone offset for CREATE operations
             const correctedStart = addTimezoneOffset(correctTimeInDatetime(args.start, userMessageContent))
             const correctedEnd = args.end ? addTimezoneOffset(correctTimeInDatetime(args.end, userMessageContent)) : undefined
 
@@ -587,25 +781,62 @@ If changing the time, update BOTH start and end times, keeping the same duration
                 location: args.location
               }
             }
+          } else if (tc.name === 'calendar_list_upcoming') {
+            // List upcoming events
+            return {
+              tool_call_id: tc.id,
+              action_type: 'calendar_list_upcoming',
+              action_params: {
+                days: args.days || 7,
+                max_results: args.max_results || 10
+              }
+            }
+          } else if (tc.name === 'calendar_search_events') {
+            // Search for events
+            return {
+              tool_call_id: tc.id,
+              action_type: 'calendar_search_events',
+              action_params: {
+                query: args.query,
+                start_date: addTimezoneOffset(args.start_date),
+                end_date: addTimezoneOffset(args.end_date),
+                max_results: args.max_results || 10
+              }
+            }
+          } else {
+            console.warn(`⚠️ [executeSearchAndContinue] Unhandled tool type: ${tc.name}`)
+            return null
           }
-
-          return null
         }).filter(Boolean)
 
-        // Show as actionable for user confirmation
+        // Check if ALL actions are search-only operations
+        const searchOnlyTypes = ['calendar_search_events', 'calendar_list_upcoming']
+        const allSearchOnly = continuationActionSteps.every(step =>
+          searchOnlyTypes.includes(step.action_type)
+        )
+
         if (continuationActionSteps.length > 0) {
-          setMessages(prev => prev.map(msg =>
-            msg.id === continuationMessageId
-              ? {
-                  ...msg,
-                  isStreaming: false,
-                  isActionable: true,
-                  action_steps: continuationActionSteps,
-                  execution_mode: 'direct',
-                  original_user_message: userMessageContent  // Store for later time correction
-                }
-              : msg
-          ))
+          if (allSearchOnly) {
+            // Auto-execute search operations and recurse
+            console.log('🔍 [executeSearchAndContinue] Continuation returned search-only operations, auto-executing...')
+
+            // Execute the search and continue again (with recursion guard)
+            await executeSearchAndContinue(continuationActionSteps, continuationMessageId, userMessageContent, depth + 1)
+          } else {
+            // Show non-search actions as actionable for user confirmation
+            setMessages(prev => prev.map(msg =>
+              msg.id === continuationMessageId
+                ? {
+                    ...msg,
+                    isStreaming: false,
+                    isActionable: true,
+                    action_steps: continuationActionSteps,
+                    execution_mode: 'direct',
+                    original_user_message: userMessageContent  // Store for later time correction
+                  }
+                : msg
+            ))
+          }
         } else {
           setMessages(prev => prev.map(msg =>
             msg.id === continuationMessageId
@@ -728,19 +959,26 @@ If changing the time, update BOTH start and end times, keeping the same duration
       abortControllerRef.current = new AbortController()
 
       // Add system message with current date and timezone context
-      const today = new Date()
-      const dateString = today.toISOString().split('T')[0] // YYYY-MM-DD
-      const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone // e.g., "America/Los_Angeles"
-      const timezoneOffset = -today.getTimezoneOffset() / 60 // e.g., -7 for PDT
-      const timezoneOffsetStr = timezoneOffset >= 0 ? `+${String(timezoneOffset).padStart(2, '0')}:00` : `-${String(Math.abs(timezoneOffset)).padStart(2, '0')}:00`
+      const { now: currentDate, timezone, timezoneOffset, localDate, localTime24 } = getCurrentDateTimeContext()
+      const tomorrowLocalDate = getRelativeLocalDateString(1)
+      const yesterdayLocalDate = getRelativeLocalDateString(-1)
 
       const systemMessage = {
         role: 'system',
         content: `You are a helpful AI assistant with access to Google Calendar and Gmail tools.
 
+OUTPUT FORMATTING:
+- Use rich markdown formatting for better readability
+- Format lists with clear bullet points or numbered items
+- Use **bold** for important information like event titles
+- Use tables when showing multiple events with similar data
+- Keep responses concise but informative
+- Do NOT use emojis in responses
+
 ⚠️ TIME FORMAT - SUPER SIMPLE ⚠️
-Current date: ${dateString}
-Current time: ${today.toLocaleTimeString()}
+Current date: ${localDate}
+Current time: ${localTime24}
+User timezone: ${timezone} (UTC${timezoneOffset})
 
 🕐 Convert times to 24-hour format (military time):
 - 6pm → 18:00
@@ -748,20 +986,20 @@ Current time: ${today.toLocaleTimeString()}
 - 2pm → 14:00
 - 10am → 10:00
 
-✅ CORRECT FORMAT: "${dateString}T<HOUR>:00:00"
+✅ CORRECT FORMAT: "${localDate}T<HOUR>:00:00"
 Where <HOUR> is 24-hour format (00-23)
 
 📋 EXAMPLES:
-User: "meeting at 6pm" → start="${dateString}T18:00:00"
-User: "event at 2pm" → start="${dateString}T14:00:00"
-User: "call at 10am" → start="${dateString}T10:00:00"
+User: "meeting at 6pm" → start="${localDate}T18:00:00"
+User: "event at 2pm" → start="${localDate}T14:00:00"
+User: "call at 10am" → start="${localDate}T10:00:00"
 
 🔴 DO NOT add timezone info (no Z, no +00:00, no -07:00) - just the time!
 
 📅 DATE HANDLING:
-- "today" → ${dateString}
-- "tomorrow" → ${new Date(today.getTime() + 86400000).toISOString().split('T')[0]}
-- "yesterday" → ${new Date(today.getTime() - 86400000).toISOString().split('T')[0]}
+- "today" → ${localDate}
+- "tomorrow" → ${tomorrowLocalDate}
+- "yesterday" → ${yesterdayLocalDate}
 
 ⚠️ CRITICAL: When updating event dates/times, you MUST update BOTH start AND end times!
 
@@ -774,18 +1012,18 @@ Example workflows:
 
 1. Moving event to different time (same day):
 User: "Move my climbing event to 3pm"
-→ calendar_update_event(event_id="...", start="YYYY-MM-DDT15:00:00", end="YYYY-MM-DDT17:00:00")
+→ calendar_update_event(event_id="...", start="${localDate}T15:00:00", end="${localDate}T17:00:00")
 Note: Update BOTH start and end times, keeping the same duration
 
 2. Moving event to different day:
 User: "Move my climbing event from tomorrow to today"
 Current event: start="2025-10-12T10:00:00", end="2025-10-12T12:00:00"
-→ calendar_update_event(event_id="...", start="${dateString}T10:00:00", end="${dateString}T12:00:00")
-⚠️ IMPORTANT: Change the date in BOTH start AND end times to "${dateString}"
+→ calendar_update_event(event_id="...", start="${localDate}T10:00:00", end="${localDate}T12:00:00")
+⚠️ IMPORTANT: Change the date in BOTH start AND end times to "${localDate}"
 
 3. Moving event to different day AND time:
 User: "Move my meeting from tomorrow to today at 2pm"
-→ calendar_update_event(event_id="...", start="${dateString}T14:00:00", end="${dateString}T16:00:00")
+→ calendar_update_event(event_id="...", start="${localDate}T14:00:00", end="${localDate}T16:00:00")
 Update date AND time in BOTH fields
 
 If search returns multiple events, ask the user to clarify which one to update.
@@ -933,9 +1171,18 @@ If search returns zero events, tell the user no matching events were found.`
                 }
               }
             } else if (tc.name === 'calendar_update_event') {
-              // Apply time correction and add timezone offset
-              const correctedStart = addTimezoneOffset(correctTimeInDatetime(args.start, userMessage.content))
-              const correctedEnd = args.end ? addTimezoneOffset(correctTimeInDatetime(args.end, userMessage.content)) : undefined
+              // For updates, preserve event duration if LLM creates zero-duration event
+              // Note: searchResults may not be available here (defaults to 1 hour)
+              const { start: preservedStart, end: preservedEnd } = preserveEventDuration(
+                args.event_id,
+                args.start,
+                args.end,
+                []  // No search results in initial processing
+              )
+
+              // Then add timezone offset
+              const startWithTimezone = addTimezoneOffset(preservedStart)
+              const endWithTimezone = preservedEnd ? addTimezoneOffset(preservedEnd) : undefined
 
               return {
                 tool_call_id: tc.id,
@@ -943,8 +1190,8 @@ If search returns zero events, tell the user no matching events were found.`
                 action_params: {
                   event_id: args.event_id,
                   title: args.title,
-                  start: correctedStart,
-                  end: correctedEnd,
+                  start: startWithTimezone,
+                  end: endWithTimezone,
                   description: args.description,
                   location: args.location
                 }
@@ -959,6 +1206,58 @@ If search returns zero events, tell the user no matching events were found.`
                   body: args.body
                 }
               }
+            } else if (tc.name === 'calendar_list_upcoming') {
+              return {
+                tool_call_id: tc.id,
+                action_type: 'calendar_list_upcoming',
+                action_params: {
+                  days: args.days || 7,
+                  max_results: args.max_results || 10
+                }
+              }
+            } else if (tc.name === 'calendar_create_recurring') {
+              // Apply time correction and add timezone offset
+              const correctedStart = addTimezoneOffset(correctTimeInDatetime(args.start, userMessage.content))
+              const correctedEnd = args.end ? addTimezoneOffset(correctTimeInDatetime(args.end, userMessage.content)) : undefined
+
+              return {
+                tool_call_id: tc.id,
+                action_type: 'calendar_create_recurring',
+                action_params: {
+                  title: args.title,
+                  start: correctedStart,
+                  end: correctedEnd,
+                  recurrence_rule: args.recurrence_rule,
+                  description: args.description,
+                  location: args.location
+                }
+              }
+            } else if (tc.name === 'calendar_add_meet_link') {
+              return {
+                tool_call_id: tc.id,
+                action_type: 'calendar_add_meet_link',
+                action_params: {
+                  event_id: args.event_id
+                }
+              }
+            } else if (tc.name === 'calendar_set_reminders') {
+              return {
+                tool_call_id: tc.id,
+                action_type: 'calendar_set_reminders',
+                action_params: {
+                  event_id: args.event_id,
+                  reminders: args.reminders
+                }
+              }
+            } else if (tc.name === 'calendar_add_attendees') {
+              return {
+                tool_call_id: tc.id,
+                action_type: 'calendar_add_attendees',
+                action_params: {
+                  event_id: args.event_id,
+                  attendees: args.attendees
+                }
+              }
             }
             return null
           }).filter(Boolean)
@@ -966,9 +1265,13 @@ If search returns zero events, tell the user no matching events were found.`
           if (actionSteps.length > 0) {
             console.log('📋 Converted to action steps:', actionSteps)
 
-            // Check if any action is a "search" (information gathering) vs "action" (execution)
-            const hasSearchOnly = actionSteps.every(step => step.action_type.includes('search'))
-            const hasSearch = actionSteps.some(step => step.action_type.includes('search'))
+            // Check if any action is a "search" or "list" (information gathering) vs "action" (execution)
+            const isQueryAction = (actionType) =>
+              actionType.includes('search') ||
+              actionType.includes('list_upcoming')
+
+            const hasSearchOnly = actionSteps.every(step => isQueryAction(step.action_type))
+            const hasSearch = actionSteps.some(step => isQueryAction(step.action_type))
 
             // If it's only search queries, auto-execute them and continue the conversation
             if (hasSearchOnly) {
@@ -1381,7 +1684,8 @@ If search returns zero events, tell the user no matching events were found.`
           ? 'transform 150ms ease-out, opacity 150ms ease-out'
           : 'transform 120ms ease-in, opacity 120ms ease-in',
         opacity: isVisible ? 1 : 0,
-        overflow: 'hidden'
+        overflow: 'hidden',
+        zIndex: 9999
       }}
     >
       {/* Loading progress bar */}
@@ -1540,8 +1844,8 @@ If search returns zero events, tell the user no matching events were found.`
               className="w-7 h-7 text-white/50 hover:text-white/90 hover:bg-white/10 flex items-center justify-center"
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
                 <circle cx="12" cy="12" r="3"></circle>
-                <path d="M12 1v6m0 6v6m9-9h-6m-6 0H3"></path>
               </svg>
             </button>
           </Tooltip>
@@ -1574,7 +1878,7 @@ If search returns zero events, tell the user no matching events were found.`
       {activeTab === 'chat' ? (
         <>
           {/* Messages area */}
-          <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar px-4 py-4" style={{
+          <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar px-4 pt-8 pb-4" style={{
             background: 'rgba(15, 23, 42, 0.3)'
           }}>
             {messages.length === 0 ? (
@@ -1596,25 +1900,25 @@ If search returns zero events, tell the user no matching events were found.`
           </div>
 
           {/* Input area */}
-          <div className="p-5 border-t" style={{
+          <div className="p-3 border-t" style={{
             background: 'rgba(30, 41, 59, 0.95)',
             borderTopColor: 'rgba(71, 85, 105, 0.3)'
           }}>
             {/* Screenshot previews */}
             {screenshots.length > 0 && (
-              <div className="mb-4 flex gap-2 flex-wrap">
+              <div className="mb-3 flex gap-2 flex-wrap">
                 {screenshots.map(screenshot => (
                   <div key={screenshot.id} className="relative group">
                     <img
                       src={screenshot.dataUrl}
                       alt={screenshot.name}
-                      className="w-16 h-16 object-cover rounded border border-white/10"
+                      className="w-14 h-14 object-cover rounded border border-white/10"
                     />
                     <button
                       onClick={() => removeScreenshot(screenshot.id)}
-                      className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 hover:bg-red-600 text-white rounded-full text-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                      className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 hover:bg-red-600 text-white rounded-full text-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
                     >
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
                         <line x1="18" y1="6" x2="6" y2="18"></line>
                         <line x1="6" y1="6" x2="18" y2="18"></line>
                       </svg>
@@ -1624,7 +1928,7 @@ If search returns zero events, tell the user no matching events were found.`
               </div>
             )}
 
-            <div className="flex gap-3 items-end">
+            <div className="flex gap-2 items-center">
               <div className="flex-1">
                 <input
                   type="text"
@@ -1632,36 +1936,36 @@ If search returns zero events, tell the user no matching events were found.`
                   onChange={(e) => setInput(e.target.value)}
                   onKeyPress={handleKeyPress}
                   placeholder="Type to ask... ⌘↵"
-                  className="w-full text-white text-sm px-4 py-3 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-white/40 transition-all"
+                  className="w-full text-white text-sm px-4 py-2.5 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-white/40 transition-all"
                   style={{
                     background: 'rgba(51, 65, 85, 0.3)',
                     border: '1px solid rgba(71, 85, 105, 0.25)',
-                    borderRadius: '14px',
-                    height: '44px',
+                    borderRadius: '12px',
+                    height: '38px',
                     fontWeight: '500'
                   }}
                   disabled={isLoading}
                 />
-                <div className="flex items-center justify-between mt-3">
+                <div className="flex items-center justify-between mt-1.5">
                   <button
                     onClick={captureScreenshot}
-                    className="text-white/40 hover:text-white/90 text-xs transition-all flex items-center gap-2.5"
+                    className="text-white/40 hover:text-white/90 text-[11px] transition-all flex items-center"
                     title="Capture screenshot"
                   >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
                       <circle cx="12" cy="13" r="4"></circle>
                     </svg>
-                    <span>Screenshot</span>
+                    <span style={{ marginLeft: '5px' }}>Screenshot</span>
                   </button>
                   <select
                     value={selectedModel}
                     onChange={(e) => setSelectedModel(e.target.value)}
-                    className="text-white/70 text-[10px] px-2.5 py-1.5 rounded focus:outline-none focus:ring-1 focus:ring-blue-500/50 cursor-pointer transition-all"
+                    className="text-white/70 text-[8px] px-2 py-0.5 rounded focus:outline-none focus:ring-1 focus:ring-blue-500/50 cursor-pointer transition-all"
                     style={{
                       background: 'rgba(51, 65, 85, 0.3)',
                       border: '1px solid rgba(71, 85, 105, 0.25)',
-                      borderRadius: '8px'
+                      borderRadius: '6px'
                     }}
                   >
                     {MODELS.map(model => (
@@ -1676,11 +1980,13 @@ If search returns zero events, tell the user no matching events were found.`
                 <button
                   onClick={stopGeneration}
                   style={{
-                    borderRadius: '14px',
+                    borderRadius: '8px',
                     transition: 'all 130ms ease-out',
-                    boxShadow: '0 2px 8px rgba(239, 68, 68, 0.2)'
+                    boxShadow: '0 2px 8px rgba(239, 68, 68, 0.2)',
+                    height: '38px',
+                    minWidth: '70px'
                   }}
-                  className="px-5 py-3 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold flex items-center gap-2"
+                  className="px-3 py-0 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold flex items-center justify-center gap-2"
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                     <rect x="6" y="6" width="12" height="12"></rect>
@@ -1692,14 +1998,16 @@ If search returns zero events, tell the user no matching events were found.`
                   onClick={sendMessage}
                   disabled={!input.trim()}
                   style={{
-                    borderRadius: '14px',
+                    borderRadius: '8px',
                     transition: 'all 130ms ease-out',
-                    boxShadow: !input.trim() ? 'none' : '0 2px 8px rgba(59, 130, 246, 0.25)'
+                    boxShadow: !input.trim() ? 'none' : '0 2px 8px rgba(59, 130, 246, 0.25)',
+                    height: '38px',
+                    minWidth: '70px'
                   }}
-                  className="px-5 py-3 bg-blue-500 hover:bg-blue-600 text-white text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-blue-500 flex items-center gap-2"
+                  className="px-3 py-0 bg-blue-500 hover:bg-blue-600 text-white text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-blue-500 flex items-center justify-center gap-1.5"
                 >
                   <span>Send</span>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <line x1="22" y1="2" x2="11" y2="13"></line>
                     <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
                   </svg>
@@ -2233,6 +2541,7 @@ function ChatMessage({ message }) {
   const isUser = message.role === 'user'
   const isAction = message.role === 'action' || message.isActionable
   const isError = message.isError
+  const isAssistant = message.role === 'assistant'
 
   // State for action execution
   const [isExecuting, setIsExecuting] = useState(false)
@@ -2259,12 +2568,14 @@ function ChatMessage({ message }) {
       const suggestionIdString = message.id ? String(message.id) : null
       console.log('🔄 [Execute] Converting suggestion_id:', message.id, '→', suggestionIdString, typeof suggestionIdString)
 
-      // Apply time correction if original user message is available
+      // Apply time correction ONLY for calendar_create_event (not updates)
+      // For updates, the LLM has context from search results and should be trusted
       let correctedActionSteps = message.action_steps
       if (message.original_user_message) {
         console.log('📝 [Execute] Original user message:', message.original_user_message)
         correctedActionSteps = message.action_steps.map(step => {
-          if (step.action_type === 'calendar_update_event' || step.action_type === 'calendar_create_event') {
+          // Only apply time correction to CREATE operations, not UPDATE
+          if (step.action_type === 'calendar_create_event') {
             const correctedParams = { ...step.action_params }
             if (correctedParams.start) {
               const correctedStart = correctTimeInDatetime(correctedParams.start, message.original_user_message)
@@ -2281,6 +2592,8 @@ function ChatMessage({ message }) {
               }
             }
             return { ...step, action_params: correctedParams }
+          } else if (step.action_type === 'calendar_update_event') {
+            console.log(`✓ [Execute] Skipping time correction for UPDATE - trusting LLM's context-aware decision`)
           }
           return step
         })
@@ -2363,8 +2676,13 @@ function ChatMessage({ message }) {
       return `<pre style="background: rgba(15, 23, 42, 0.6); padding: 12px; border-radius: 6px; margin: 8px 0; overflow-x: auto; border: 1px solid rgba(71, 85, 105, 0.3);"><code class="text-xs text-white/90 font-mono">${code.trim()}</code></pre>`
     })
 
-    // Inline code
+    // Inline code (must be before links to avoid matching backticks in URLs)
     content = content.replace(/`([^`]+)`/g, '<code style="background: rgba(15, 23, 42, 0.6); padding: 2px 6px; border-radius: 4px; font-size: 0.8125rem; font-family: monospace; border: 1px solid rgba(71, 85, 105, 0.2);">$1</code>')
+
+    // Markdown links [text](url)
+    content = content.replace(/\[([^\]]+)\]\(([^\)]+)\)/g, (match, text, url) => {
+      return `<a href="${url}" class="text-blue-400 hover:text-blue-300 underline transition-colors cursor-pointer" onclick="event.preventDefault(); window.require('electron').shell.openExternal('${url}')" target="_blank" rel="noopener noreferrer">${text}</a>`
+    })
 
     // Bold
     content = content.replace(/\*\*(.+?)\*\*/g, '<strong class="font-semibold">$1</strong>')
@@ -2385,9 +2703,9 @@ function ChatMessage({ message }) {
         color: isUser ? 'rgba(147, 197, 253, 0.9)' : isAction ? 'rgba(134, 239, 172, 0.9)' : 'rgba(203, 213, 225, 0.9)',
         border: `1px solid ${isUser ? 'rgba(59, 130, 246, 0.3)' : isAction ? 'rgba(34, 197, 94, 0.3)' : 'rgba(100, 116, 139, 0.3)'}`
       }}>
-        {isUser ? 'U' : isAction ? '⚡' : 'A'}
+        {isUser ? 'U' : isAction ? '⚡' : (isAssistant ? 'A' : '?')}
       </div>
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 overflow-hidden">
         <div className="text-xs text-white/40 mb-1.5 font-medium">
           {displayName}
         </div>
@@ -2395,6 +2713,11 @@ function ChatMessage({ message }) {
           className={`text-sm break-words leading-relaxed ${
             isError ? 'text-red-300' : 'text-white/85'
           }`}
+          style={{
+            wordBreak: 'break-word',
+            overflowWrap: 'anywhere',
+            maxWidth: '100%'
+          }}
           dangerouslySetInnerHTML={{ __html: renderContent(message.content) }}
         />
         {message.isStreaming && (

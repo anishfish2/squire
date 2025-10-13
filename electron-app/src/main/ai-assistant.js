@@ -29,6 +29,20 @@ class AIAssistant {
     this.sessionId = null;
   }
 
+  getActiveUserId() {
+    if (this.userId) {
+      return this.userId;
+    }
+
+    const user = authStore.getUser();
+    if (user?.id) {
+      this.userId = user.id;
+      return user.id;
+    }
+
+    return null;
+  }
+
   initializeSSE(sessionId) {
     this.sessionId = sessionId;
 
@@ -490,9 +504,15 @@ class AIAssistant {
     console.log(`   - Trigger: ${context.trigger}`);
 
     try {
+      const userId = this.getActiveUserId();
+      if (!userId) {
+        console.warn('❌ [AI] Cannot run immediate action analysis without authenticated user');
+        return [];
+      }
+
       // Build single-app batch request with high priority
       const batchRequest = {
-        user_id: this.userId || "550e8400-e29b-41d4-a716-446655440000",
+        user_id: userId,
         session_id: this.sessionId || `session_${Date.now()}`,
         sequence_metadata: {
           sequence_id: `action_detect_${Date.now()}`,
@@ -615,49 +635,51 @@ class AIAssistant {
       this.updateUserContext(appInfo);
       const context = this.buildEnhancedContextForOpenAI(appInfo, ocrResults);
 
-      const userId = "550e8400-e29b-41d4-a716-446655440000";
+      const userId = this.getActiveUserId();
+      if (!userId) {
+        console.warn('❌ [AI] Cannot generate suggestions without authenticated user');
+        return [];
+      }
 
-      this.log("user_id" + userId);
+      const now = Date.now();
+      const meaningfulContext = (context.recent_ocr_context?.text_lines || []).slice(0, 30).join('\n');
 
-      const requestData = {
+      const batchRequest = {
         user_id: userId,
-        app_name: appInfo.appName || 'Unknown',
-        window_title: appInfo.windowTitle || '',
-        ocr_text: ocrResults,
-        user_context: context.user_context,
-        current_session: context.current_session,
-        context_signals: context.context_signals,
-        recent_ocr_context: context.recent_ocr_context,
-        activity_context: context.activity_context
+        session_id: this.sessionId || null,
+        sequence_metadata: {
+          sequence_id: `single_${now}`,
+          total_apps: 1,
+          sequence_duration: 0,
+          rapid_switching: false,
+          unique_apps: 1,
+          trigger_reasons: ['single_app'],
+          workflow_pattern: 'single_app'
+        },
+        app_sequence: [
+          {
+            timestamp: now,
+            appName: appInfo.appName || 'Unknown',
+            windowTitle: appInfo.windowTitle || '',
+            bundleId: appInfo.bundleId || '',
+            ocrText: ocrResults,
+            meaningful_context: meaningfulContext,
+            sequence: 0,
+            trigger_reason: 'single_app',
+            duration_in_app: 0,
+            application_type: appInfo.applicationType || '',
+            interaction_context: context.activity_context?.activitySummary || '',
+            extracted_entities: []
+          }
+        ],
+        request_type: 'single_app',
+        context_signals: {
+          ...context.context_signals,
+          trigger: 'single_app_generation'
+        }
       };
 
-      this.log('📊 Context:', JSON.stringify({
-        app: appInfo.appName,
-        ocrLines: ocrResults.length,
-        focusState: context.context_signals.focus_state,
-        backendUrl: this.backendUrl
-      }));
-      this.log('📤 Request payload size:', JSON.stringify(requestData).length, 'bytes');
-
-      this.log('📡 Making HTTP request to:', `${this.backendUrl}/api/ai/context`);
-      this.log("requestData userid" + requestData.user_id);
-      const response = await this.makeHttpRequest(`${this.backendUrl}/api/ai/context`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestData)
-      });
-
-      if (response.suggestions && response.suggestions.length > 0) {
-      }
-
-      const suggestions = response.suggestions || [];
-
-      if (suggestions.length > 0) {
-        this.trackSuggestion(suggestions, ocrResults);
-      }
-
+      const suggestions = await this.processBatchRequest(batchRequest);
       return suggestions;
 
     } catch (error) {

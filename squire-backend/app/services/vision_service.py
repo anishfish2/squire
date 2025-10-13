@@ -68,7 +68,7 @@ class VisionService:
                 "patterns": "Notable workflows or patterns",
                 "insights": "Productivity insights",
                 "provider": "anthropic/openai",
-                "model": "claude-3-5-sonnet-20241022/gpt-4-vision-preview"
+                "model": "claude-3-5-sonnet-20241022/gpt-5"
             }
         """
         provider = provider or self.default_provider
@@ -153,9 +153,9 @@ class VisionService:
             # Build prompt
             prompt = self._build_analysis_prompt(app_name)
 
-            # Call GPT-4 Vision API
+            # Call GPT-4 Vision API (using gpt-5 for latest vision capabilities)
             response = self.openai_client.chat.completions.create(
-                model="gpt-4-vision-preview",
+                model="gpt-5",
                 messages=[
                     {
                         "role": "user",
@@ -184,7 +184,7 @@ class VisionService:
             return {
                 "raw_response": response_text,
                 "provider": "openai",
-                "model": "gpt-4-vision-preview",
+                "model": "gpt-5",
                 "app_name": app_name,
                 **self._parse_analysis_response(response_text)
             }

@@ -161,6 +161,141 @@ TOOLS = [
                 "required": ["to", "subject", "body"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calendar_list_upcoming",
+            "description": "List upcoming calendar events in the next N days",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "days": {
+                        "type": "integer",
+                        "description": "Number of days to look ahead (default: 7)"
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Maximum number of events to return (default: 10)"
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calendar_create_recurring",
+            "description": "Create a recurring calendar event with recurrence rules",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Event title"
+                    },
+                    "start": {
+                        "type": "string",
+                        "description": "First occurrence start time in ISO 8601 format"
+                    },
+                    "end": {
+                        "type": "string",
+                        "description": "First occurrence end time in ISO 8601 format"
+                    },
+                    "recurrence_rule": {
+                        "type": "string",
+                        "description": "RRULE format string. Examples: 'RRULE:FREQ=DAILY' (daily), 'RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR' (Mon/Wed/Fri), 'RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR' (weekdays), 'RRULE:FREQ=MONTHLY;BYMONTHDAY=15' (15th of each month)"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Event description (optional)"
+                    },
+                    "location": {
+                        "type": "string",
+                        "description": "Event location (optional)"
+                    }
+                },
+                "required": ["title", "start", "recurrence_rule"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calendar_add_meet_link",
+            "description": "Add a Google Meet video conference link to an existing calendar event. You must search for the event first to get the event_id.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "event_id": {
+                        "type": "string",
+                        "description": "The ID of the event to add Google Meet link to (obtained from calendar_search_events)"
+                    }
+                },
+                "required": ["event_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calendar_set_reminders",
+            "description": "Set custom reminders for a calendar event. You must search for the event first to get the event_id.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "event_id": {
+                        "type": "string",
+                        "description": "The ID of the event to set reminders for (obtained from calendar_search_events)"
+                    },
+                    "reminders": {
+                        "type": "array",
+                        "description": "Array of reminder objects. Each object has 'method' (email or popup) and 'minutes' (minutes before event)",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "method": {
+                                    "type": "string",
+                                    "enum": ["email", "popup"],
+                                    "description": "Reminder method"
+                                },
+                                "minutes": {
+                                    "type": "integer",
+                                    "description": "Minutes before event to send reminder"
+                                }
+                            },
+                            "required": ["method", "minutes"]
+                        }
+                    }
+                },
+                "required": ["event_id", "reminders"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calendar_add_attendees",
+            "description": "Add attendees/guests to an existing calendar event. You must search for the event first to get the event_id.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "event_id": {
+                        "type": "string",
+                        "description": "The ID of the event to add attendees to (obtained from calendar_search_events)"
+                    },
+                    "attendees": {
+                        "type": "array",
+                        "description": "Array of email addresses to invite",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "required": ["event_id", "attendees"]
+            }
+        }
     }
 ]
 
@@ -194,7 +329,21 @@ async def generate_stream(request: ChatRequest):
 
         # Prepare kwargs
         kwargs = {}
-        if request.temperature is not None:
+        def model_requires_default_temperature(model_name: str) -> bool:
+            if not model_name:
+                return False
+            lowered = model_name.lower()
+            locked_prefixes = (
+                "o1",          # OpenAI reasoning models (o1 family)
+                "o4",          # OpenAI o4 family
+                "gpt-4.1-reasoning",
+                "gpt-4.1-mini-reasoning",
+                "gpt-4o-realtime",
+                "gpt-5"        # GPT-5 family requires default temperature
+            )
+            return any(lowered.startswith(prefix) for prefix in locked_prefixes)
+
+        if request.temperature is not None and not model_requires_default_temperature(request.model):
             kwargs['temperature'] = request.temperature
         if request.max_tokens is not None:
             kwargs['max_tokens'] = request.max_tokens
@@ -335,7 +484,21 @@ async def chat_completion(request: ChatRequest):
 
         # Prepare kwargs
         kwargs = {}
-        if request.temperature is not None:
+        def model_requires_default_temperature(model_name: str) -> bool:
+            if not model_name:
+                return False
+            lowered = model_name.lower()
+            locked_prefixes = (
+                "o1",
+                "o4",
+                "gpt-4.1-reasoning",
+                "gpt-4.1-mini-reasoning",
+                "gpt-4o-realtime",
+                "gpt-5"
+            )
+            return any(lowered.startswith(prefix) for prefix in locked_prefixes)
+
+        if request.temperature is not None and not model_requires_default_temperature(request.model):
             kwargs['temperature'] = request.temperature
         if request.max_tokens is not None:
             kwargs['max_tokens'] = request.max_tokens
@@ -375,15 +538,30 @@ async def list_models():
     Returns:
         List of available models with their providers
     """
+
+    
     models = [
-        {"id": "gpt-4", "name": "GPT-4", "provider": "OpenAI"},
-        {"id": "gpt-4-turbo", "name": "GPT-4 Turbo", "provider": "OpenAI"},
+        # OpenAI (official)
+        {"id": "gpt-4o", "name": "GPT-4o (Latest)", "provider": "OpenAI"},
+        {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "provider": "OpenAI"},
+        {"id": "o1-preview", "name": "O1 Preview (Reasoning)", "provider": "OpenAI"},
+        {"id": "o1-mini", "name": "O1 Mini (Reasoning)", "provider": "OpenAI"},
         {"id": "gpt-3.5-turbo", "name": "GPT-3.5 Turbo", "provider": "OpenAI"},
-        {"id": "claude-3-opus", "name": "Claude 3 Opus", "provider": "Anthropic"},
-        {"id": "claude-3-sonnet", "name": "Claude 3 Sonnet", "provider": "Anthropic"},
-        {"id": "claude-3-haiku", "name": "Claude 3 Haiku", "provider": "Anthropic"},
-        {"id": "gemini-pro", "name": "Gemini Pro", "provider": "Google"},
+
+        # Anthropic (official model IDs include dates)
+        {"id": "claude-3-opus-20240229", "name": "Claude 3 Opus", "provider": "Anthropic"},
+        {"id": "claude-3-sonnet-20240229", "name": "Claude 3 Sonnet", "provider": "Anthropic"},
+        {"id": "claude-3-haiku-20240307", "name": "Claude 3 Haiku", "provider": "Anthropic"},
+        {"id": "claude-3-5-sonnet-20240620", "name": "Claude 3.5 Sonnet", "provider": "Anthropic"},
+
+        # Google Gemini
+        {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro", "provider": "Google"},
+        {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash", "provider": "Google"},
+        {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash", "provider": "Google"},
+        {"id": "gemini-pro", "name": "Gemini Pro (Legacy)", "provider": "Google"},
     ]
+
+
 
     # Filter to only show models with available API keys
     available_models = []

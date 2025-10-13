@@ -24,7 +24,7 @@ class ComprehensiveActivityTracker {
     this.bufferFlushInterval = null;
 
     this.backendUrl = "http://127.0.0.1:8000";
-    this.userId = userId || "550e8400-e29b-41d4-a716-446655440000";
+    this.userId = userId || null;
     this.sessionId = sessionId;
 
     this.currentApp = null;
@@ -488,19 +488,24 @@ class ComprehensiveActivityTracker {
         headers["Authorization"] = `Bearer ${token}`;
       }
 
+      const statsPayload = {
+        session_id: this.sessionId,
+        stats: {
+          ...this.sessionStats,
+          sessionDuration: Date.now() - this.sessionStats.sessionStart,
+          mouseMovementSummary: this.getMouseMovementSummary(),
+          timestamp: Date.now()
+        }
+      };
+
+      if (this.userId) {
+        statsPayload.user_id = this.userId;
+      }
+
       const response = await fetch(`${this.backendUrl}/api/activity/session-stats`, {
         method: "POST",
         headers: headers,
-        body: JSON.stringify({
-          // user_id is no longer needed - comes from auth token
-          session_id: this.sessionId,
-          stats: {
-            ...this.sessionStats,
-            sessionDuration: Date.now() - this.sessionStats.sessionStart,
-            mouseMovementSummary: this.getMouseMovementSummary(),
-            timestamp: Date.now(),
-          },
-        }),
+        body: JSON.stringify(statsPayload),
       });
 
       if (response.ok) {
@@ -543,4 +548,3 @@ class ComprehensiveActivityTracker {
 }
 
 export default ComprehensiveActivityTracker
-

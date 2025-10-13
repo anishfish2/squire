@@ -128,7 +128,9 @@ class WebSocketManager {
 
     setTimeout(() => {
       if (!this.isConnected && this.userId) {
-        this.connect(this.userId, this.sessionId);
+        this.connect(this.userId, this.sessionId).catch(error => {
+          console.warn('⚠️ [WebSocketManager] Reconnect attempt failed:', error?.message || error);
+        });
       }
     }, delay);
   }

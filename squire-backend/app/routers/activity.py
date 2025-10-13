@@ -22,7 +22,7 @@ class ActivityBatchRequest(BaseModel):
     events: List[ActivityEvent] = Field(..., description="Batch of activity events")
 
 class SessionStatsRequest(BaseModel):
-    user_id: str = Field(..., description="User ID")
+    user_id: Optional[str] = Field(None, description="User ID (optional, derived from JWT when omitted)")
     session_id: Optional[str] = Field(None, description="Current session ID")
     stats: Dict[str, Any] = Field(..., description="Session statistics")
 
@@ -45,9 +45,15 @@ class SessionCreateRequest(BaseModel):
     created_at: str = Field(..., description="Creation timestamp")
     updated_at: str = Field(..., description="Update timestamp")
 
-@router.get("/current-session/{user_id}")
-async def get_current_session(user_id: str):
+@router.get("/current-session/{user_id}", dependencies=[Depends(jwt_bearer)])
+async def get_current_session(
+    user_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     try:
+        if current_user["id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to view session")
+
         result = supabase.table("user_sessions").select("id").eq(
             "user_id", user_id
         ).is_("session_end", "null").order("created_at", desc=True).limit(1).execute()
@@ -130,11 +136,16 @@ async def store_activity_batch(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to store activity events: {str(e)}")
 
-@router.post("/session-stats")
-async def store_session_stats(stats_data: SessionStatsRequest):
+@router.post("/session-stats", dependencies=[Depends(jwt_bearer)])
+async def store_session_stats(
+    stats_data: SessionStatsRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     try:
+        user_id = current_user["id"]
+
         event_record = {
-            "user_id": stats_data.user_id,
+            "user_id": user_id,
             "event_type": "habit",
             "event_data": {
                 "session_stats": stats_data.stats,
@@ -160,23 +171,30 @@ async def store_session_stats(stats_data: SessionStatsRequest):
         raise HTTPException(status_code=500, detail=f"Failed to store session stats: {str(e)}")
 
 
-@router.post("/profiles")
-async def create_profile(profile_data: ProfileCreateRequest):
+@router.post("/profiles", dependencies=[Depends(jwt_bearer)])
+async def create_profile(
+    profile_data: ProfileCreateRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     try:
+        auth_user_id = current_user["id"]
+        if profile_data.id and profile_data.id != auth_user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to modify another profile")
+
         # Check if profile already exists
-        existing = supabase.table("user_profiles").select("id").eq("id", profile_data.id).execute()
+        existing = supabase.table("user_profiles").select("id").eq("id", auth_user_id).execute()
 
         if existing.data and len(existing.data) > 0:
             # Profile already exists, just return success
             return {
                 "status": "success",
                 "message": "Profile already exists",
-                "profile_id": profile_data.id
+                "profile_id": auth_user_id
             }
 
         # Profile doesn't exist, create it
         result = supabase.table("user_profiles").insert({
-            "id": profile_data.id,
+            "id": auth_user_id,
             "email": profile_data.email,
             "full_name": profile_data.full_name,
             "created_at": profile_data.created_at,
@@ -190,28 +208,35 @@ async def create_profile(profile_data: ProfileCreateRequest):
             return {
                 "status": "success",
                 "message": "Profile created successfully",
-                "profile_id": profile_data.id
+                "profile_id": auth_user_id
             }
         else:
             raise HTTPException(status_code=500, detail="Failed to create profile")
 
     except Exception as e:
         try:
-            existing_result = supabase.table("user_profiles").select("id").eq("id", profile_data.id).execute()
+            existing_result = supabase.table("user_profiles").select("id").eq("id", auth_user_id).execute()
             if existing_result.data and len(existing_result.data) > 0:
                 return {
                     "status": "exists",
                     "message": "Profile already exists",
-                    "profile_id": profile_data.id
+                    "profile_id": auth_user_id
                 }
         except Exception as check_error:
             pass
 
         raise HTTPException(status_code=500, detail=f"Failed to create profile: {str(e)}")
 
-@router.post("/sessions")
-async def create_session(session_data: SessionCreateRequest):
+@router.post("/sessions", dependencies=[Depends(jwt_bearer)])
+async def create_session(
+    session_data: SessionCreateRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     try:
+        auth_user_id = current_user["id"]
+        if session_data.user_id != auth_user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to create session for another user")
+
         # Check if session already exists
         existing = supabase.table("user_sessions").select("id").eq("id", session_data.id).execute()
 
@@ -225,7 +250,7 @@ async def create_session(session_data: SessionCreateRequest):
 
         result = supabase.table("user_sessions").insert({
             "id": session_data.id,
-            "user_id": session_data.user_id,
+            "user_id": auth_user_id,
             "device_info": session_data.device_info,
             "session_start": session_data.session_start,
             "session_type": session_data.session_type,
@@ -245,14 +270,18 @@ async def create_session(session_data: SessionCreateRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create session: {str(e)}")
 
-@router.post("/end-session/{session_id}")
-async def end_session(session_id: str):
+@router.post("/end-session/{session_id}", dependencies=[Depends(jwt_bearer)])
+async def end_session(
+    session_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     try:
+        auth_user_id = current_user["id"]
         result = supabase.table("user_sessions").update({
             "session_end": datetime.now().isoformat(),
             "session_type": "closed",
             "updated_at": datetime.now().isoformat()
-        }).eq("id", session_id).eq("session_type", "active").execute()
+        }).eq("id", session_id).eq("user_id", auth_user_id).eq("session_type", "active").execute()
 
         if result.data:
             return {
