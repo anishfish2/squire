@@ -5,7 +5,7 @@ LLM Router for handling chat API endpoints.
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 import json
 import logging
 
@@ -19,9 +19,9 @@ router = APIRouter(prefix="/api/chat", tags=["llm"])
 
 
 class Message(BaseModel):
-    """Chat message model - supports OpenAI format."""
+    """Chat message model - supports OpenAI format including multimodal content."""
     role: str  # 'system', 'user', 'assistant', or 'tool'
-    content: Optional[str] = None  # Can be null for assistant messages with tool_calls
+    content: Optional[Union[str, List[Dict[str, Any]]]] = None  # String or multimodal array (for images)
     tool_calls: Optional[List[Dict[str, Any]]] = None  # For assistant messages
     tool_call_id: Optional[str] = None  # For tool response messages
     name: Optional[str] = None  # For tool response messages

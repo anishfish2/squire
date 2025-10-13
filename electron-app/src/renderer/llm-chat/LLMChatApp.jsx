@@ -352,8 +352,8 @@ function LLMChatApp() {
   const [isVisible, setIsVisible] = useState(false)
   const [isWindowOpen, setIsWindowOpen] = useState(false)
   const [screenshots, setScreenshots] = useState([])
+  const [uploadedFiles, setUploadedFiles] = useState([])
   const [visionEnabled, setVisionEnabled] = useState(false)
-  const fileInputRef = useRef(null)
 
   // Tab state
   const [activeTab, setActiveTab] = useState('chat') // 'chat' or 'suggestions'
@@ -930,15 +930,74 @@ If changing the time, update BOTH start and end times, keeping the same duration
   const sendMessage = async () => {
     if (!input.trim() || isLoading) return
 
+    // Build message content - multimodal format for images
+    let messageContent
+    const hasImages = uploadedFiles.some(f => f.type.startsWith('image/')) || screenshots.length > 0
+
+    if (hasImages) {
+      // Use array format for multimodal content (images + text)
+      messageContent = []
+
+      // Add text part
+      let textContent = input.trim()
+
+      // Add non-image file contents to text
+      const textFiles = uploadedFiles.filter(f => !f.type.startsWith('image/'))
+      if (textFiles.length > 0) {
+        textContent += '\n\n[Attached Files]:\n'
+        textFiles.forEach(file => {
+          textContent += `\n- File: ${file.name}\nContent:\n\`\`\`\n${file.content}\n\`\`\`\n`
+        })
+      }
+
+      messageContent.push({
+        type: 'text',
+        text: textContent
+      })
+
+      // Add screenshot images
+      screenshots.forEach(screenshot => {
+        messageContent.push({
+          type: 'image_url',
+          image_url: {
+            url: screenshot.dataUrl
+          }
+        })
+      })
+
+      // Add uploaded images
+      uploadedFiles.filter(f => f.type.startsWith('image/')).forEach(file => {
+        messageContent.push({
+          type: 'image_url',
+          image_url: {
+            url: file.content
+          }
+        })
+      })
+    } else {
+      // Plain text content
+      messageContent = input.trim()
+
+      // Add file contents to the message
+      if (uploadedFiles.length > 0) {
+        messageContent += '\n\n[Attached Files]:\n'
+        uploadedFiles.forEach(file => {
+          messageContent += `\n- File: ${file.name}\nContent:\n\`\`\`\n${file.content}\n\`\`\`\n`
+        })
+      }
+    }
+
     const userMessage = {
       role: 'user',
-      content: input.trim(),
+      content: messageContent,
       timestamp: new Date().toISOString(),
       model: selectedModel
     }
 
     setMessages(prev => [...prev, userMessage])
     setInput('')
+    setUploadedFiles([]) // Clear files after sending
+    setScreenshots([]) // Clear screenshots after sending
     setIsLoading(true)
 
     // Create assistant message placeholder
@@ -1380,6 +1439,65 @@ If search returns zero events, tell the user no matching events were found.`
     setScreenshots(prev => prev.filter(s => s.id !== id))
   }
 
+  // File handling - open file picker
+  const handleAddFile = async () => {
+    try {
+      const result = await ipcRenderer.invoke('open-file-dialog')
+      if (result && !result.canceled && result.filePaths && result.filePaths.length > 0) {
+        const fs = require('fs')
+        const path = require('path')
+
+        const maxSize = 20 * 1024 * 1024 // 20MB limit
+
+        for (const filePath of result.filePaths) {
+          const stats = fs.statSync(filePath)
+
+          if (stats.size > maxSize) {
+            console.warn(`File ${path.basename(filePath)} is too large (${(stats.size / 1024 / 1024).toFixed(2)}MB). Max size is 20MB.`)
+            continue
+          }
+
+          const fileData = {
+            id: Date.now() + Math.random(),
+            name: path.basename(filePath),
+            size: stats.size,
+            type: '', // Will be determined by extension
+            content: null
+          }
+
+          // Read file content
+          const ext = path.extname(filePath).toLowerCase()
+          if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'].includes(ext)) {
+            // Read as data URL for images
+            const buffer = fs.readFileSync(filePath)
+            const base64 = buffer.toString('base64')
+            const mimeType = ext === '.jpg' ? 'jpeg' : ext.slice(1)
+            fileData.content = `data:image/${mimeType};base64,${base64}`
+            fileData.type = `image/${mimeType}`
+          } else {
+            // Read as text
+            try {
+              fileData.content = fs.readFileSync(filePath, 'utf-8')
+              fileData.type = 'text/plain'
+            } catch (e) {
+              // If it fails to read as text, skip the file
+              console.error(`Could not read file ${filePath} as text:`, e)
+              continue
+            }
+          }
+
+          setUploadedFiles(prev => [...prev, fileData])
+        }
+      }
+    } catch (error) {
+      console.error('Error opening file:', error)
+    }
+  }
+
+  const removeFile = (id) => {
+    setUploadedFiles(prev => prev.filter(f => f.id !== id))
+  }
+
   // Toggle vision
   const toggleVision = () => {
     const newState = !visionEnabled
@@ -1672,7 +1790,7 @@ If search returns zero events, tell the user no matching events were found.`
 
   return (
     <div
-      className="w-full h-full flex flex-col"
+      className="w-full h-full flex flex-col relative"
       style={{
         WebkitAppRegion: 'no-drag',
         background: 'rgba(15, 23, 42, 0.08)',
@@ -1685,7 +1803,8 @@ If search returns zero events, tell the user no matching events were found.`
           : 'transform 120ms ease-in, opacity 120ms ease-in',
         opacity: isVisible ? 1 : 0,
         overflow: 'hidden',
-        zIndex: 9999
+        zIndex: 9999,
+        pointerEvents: 'auto'
       }}
     >
       {/* Loading progress bar */}
@@ -1878,9 +1997,12 @@ If search returns zero events, tell the user no matching events were found.`
       {activeTab === 'chat' ? (
         <>
           {/* Messages area */}
-          <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar px-4 pt-8 pb-4" style={{
-            background: 'rgba(15, 23, 42, 0.3)'
-          }}>
+          <div
+            className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar px-4 pt-8 pb-4"
+            style={{
+              background: 'rgba(15, 23, 42, 0.3)'
+            }}
+          >
             {messages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-white/40 text-sm gap-2">
                 <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.4">
@@ -1900,7 +2022,7 @@ If search returns zero events, tell the user no matching events were found.`
           </div>
 
           {/* Input area */}
-          <div className="p-3 border-t" style={{
+          <div className="px-3 py-3 border-t" style={{
             background: 'rgba(30, 41, 59, 0.95)',
             borderTopColor: 'rgba(71, 85, 105, 0.3)'
           }}>
@@ -1928,28 +2050,86 @@ If search returns zero events, tell the user no matching events were found.`
               </div>
             )}
 
+            {/* Uploaded file previews */}
+            {uploadedFiles.length > 0 && (
+              <div className="mb-3 flex gap-2 flex-wrap">
+                {uploadedFiles.map(file => (
+                  <div key={file.id} className="relative group">
+                    <div className="w-auto px-3 py-2 rounded border border-blue-500/30 bg-blue-500/10 flex items-center gap-2">
+                      {file.type.startsWith('image/') ? (
+                        <img
+                          src={file.content}
+                          alt={file.name}
+                          className="w-8 h-8 object-cover rounded"
+                        />
+                      ) : (
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(96, 165, 250, 0.8)" strokeWidth="2">
+                          <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+                          <polyline points="13 2 13 9 20 9"></polyline>
+                        </svg>
+                      )}
+                      <div className="flex flex-col">
+                        <span className="text-white/90 text-xs max-w-[120px] truncate">{file.name}</span>
+                        <span className="text-white/40 text-[10px]">{(file.size / 1024).toFixed(1)}KB</span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => removeFile(file.id)}
+                      className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 hover:bg-red-600 text-white rounded-full text-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                    >
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div className="flex gap-2 items-center">
-              <div className="flex-1">
+              <button
+                onClick={handleAddFile}
+                className="text-white/40 hover:text-white/90 transition-all flex items-center justify-center flex-shrink-0"
+                style={{
+                  fontSize: '11px',
+                  width: '38px',
+                  height: '38px',
+                  borderRadius: '10px',
+                  background: 'rgba(51, 65, 85, 0.3)',
+                  border: '1px solid rgba(71, 85, 105, 0.25)'
+                }}
+                title="Add file"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+              </button>
+              <div className="flex-1 min-w-0">
                 <input
                   type="text"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyPress={handleKeyPress}
                   placeholder="Type to ask... ⌘↵"
-                  className="w-full text-white text-sm px-4 py-2.5 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-white/40 transition-all"
+                  className="w-full text-white text-sm py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-white/40 transition-all"
                   style={{
                     background: 'rgba(51, 65, 85, 0.3)',
                     border: '1px solid rgba(71, 85, 105, 0.25)',
-                    borderRadius: '12px',
+                    borderRadius: '10px',
                     height: '38px',
-                    fontWeight: '500'
+                    fontWeight: '500',
+                    paddingLeft: '14px',
+                    paddingRight: '14px'
                   }}
                   disabled={isLoading}
                 />
-                <div className="flex items-center justify-between mt-1.5">
+                <div className="flex items-center justify-between mt-1.5 gap-2 flex-wrap">
                   <button
                     onClick={captureScreenshot}
-                    className="text-white/40 hover:text-white/90 text-[11px] transition-all flex items-center"
+                    className="text-white/40 hover:text-white/90 transition-all flex items-center flex-shrink-0"
+                    style={{ fontSize: '11px' }}
                     title="Capture screenshot"
                   >
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1961,15 +2141,16 @@ If search returns zero events, tell the user no matching events were found.`
                   <select
                     value={selectedModel}
                     onChange={(e) => setSelectedModel(e.target.value)}
-                    className="text-white/70 text-[8px] px-2 py-0.5 rounded focus:outline-none focus:ring-1 focus:ring-blue-500/50 cursor-pointer transition-all"
+                    className="text-white/70 px-2 py-1 rounded focus:outline-none focus:ring-1 focus:ring-blue-500/50 cursor-pointer transition-all"
                     style={{
                       background: 'rgba(51, 65, 85, 0.3)',
                       border: '1px solid rgba(71, 85, 105, 0.25)',
-                      borderRadius: '6px'
+                      borderRadius: '6px',
+                      fontSize: '9px'
                     }}
                   >
                     {MODELS.map(model => (
-                      <option key={model.id} value={model.id} style={{ background: 'rgba(30, 41, 59, 1)' }}>
+                      <option key={model.id} value={model.id} style={{ background: 'rgba(30, 41, 59, 1)', fontSize: '11px' }}>
                         {model.name}
                       </option>
                     ))}
@@ -1986,7 +2167,7 @@ If search returns zero events, tell the user no matching events were found.`
                     height: '38px',
                     minWidth: '70px'
                   }}
-                  className="px-3 py-0 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold flex items-center justify-center gap-2"
+                  className="px-3 py-0 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold flex items-center justify-center gap-2 flex-shrink-0"
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                     <rect x="6" y="6" width="12" height="12"></rect>
@@ -2004,7 +2185,7 @@ If search returns zero events, tell the user no matching events were found.`
                     height: '38px',
                     minWidth: '70px'
                   }}
-                  className="px-3 py-0 bg-blue-500 hover:bg-blue-600 text-white text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-blue-500 flex items-center justify-center gap-1.5"
+                  className="px-3 py-0 bg-blue-500 hover:bg-blue-600 text-white text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-blue-500 flex items-center justify-center gap-2 flex-shrink-0"
                 >
                   <span>Send</span>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -2494,7 +2675,20 @@ function SuggestionCard({ suggestion, isExpanded, onToggle }) {
                                     href={result.data.html_link}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1.5 text-blue-400 hover:text-blue-300 transition-colors pl-6 group text-xs"
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ml-6 group"
+                                    style={{
+                                      background: 'rgba(59, 130, 246, 0.15)',
+                                      border: '1px solid rgba(59, 130, 246, 0.3)',
+                                      color: 'rgb(96, 165, 250)'
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      e.currentTarget.style.background = 'rgba(59, 130, 246, 0.25)'
+                                      e.currentTarget.style.borderColor = 'rgba(59, 130, 246, 0.5)'
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      e.currentTarget.style.background = 'rgba(59, 130, 246, 0.15)'
+                                      e.currentTarget.style.borderColor = 'rgba(59, 130, 246, 0.3)'
+                                    }}
                                     onClick={(e) => {
                                       e.preventDefault()
                                       window.require('electron').shell.openExternal(result.data.html_link)
@@ -2671,9 +2865,30 @@ function ChatMessage({ message }) {
   const renderContent = (content) => {
     if (!content) return ''
 
+    // Handle multimodal content (array with text and images)
+    if (Array.isArray(content)) {
+      // Extract text parts and return as HTML with images
+      let html = ''
+      content.forEach(part => {
+        if (part.type === 'text') {
+          html += renderTextContent(part.text)
+        } else if (part.type === 'image_url') {
+          html += `<img src="${part.image_url.url}" style="max-width: 300px; border-radius: 8px; margin: 8px 0; border: 1px solid rgba(71, 85, 105, 0.3);" />`
+        }
+      })
+      return html
+    }
+
+    // Handle plain text content
+    return renderTextContent(content)
+  }
+
+  const renderTextContent = (content) => {
+    if (!content) return ''
+
     // Code blocks
     content = content.replace(/```(\w*)\n([\s\S]*?)```/g, (match, lang, code) => {
-      return `<pre style="background: rgba(15, 23, 42, 0.6); padding: 12px; border-radius: 6px; margin: 8px 0; overflow-x: auto; border: 1px solid rgba(71, 85, 105, 0.3);"><code class="text-xs text-white/90 font-mono">${code.trim()}</code></pre>`
+      return `<pre style="background: rgba(15, 23, 42, 0.6); padding: 8px; border-radius: 6px; margin: 8px 0; overflow-x: auto; border: 1px solid rgba(71, 85, 105, 0.3); max-width: 100%; font-size: 11px;"><code class="text-white/90 font-mono" style="word-wrap: break-word; white-space: pre-wrap;">${code.trim()}</code></pre>`
     })
 
     // Inline code (must be before links to avoid matching backticks in URLs)
@@ -2841,13 +3056,26 @@ function ChatMessage({ message }) {
                             href={result.data.html_link}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 text-blue-400 hover:text-blue-300 transition-colors pl-6 group"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ml-6 group"
+                            style={{
+                              background: 'rgba(59, 130, 246, 0.15)',
+                              border: '1px solid rgba(59, 130, 246, 0.3)',
+                              color: 'rgb(96, 165, 250)'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.background = 'rgba(59, 130, 246, 0.25)'
+                              e.currentTarget.style.borderColor = 'rgba(59, 130, 246, 0.5)'
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.background = 'rgba(59, 130, 246, 0.15)'
+                              e.currentTarget.style.borderColor = 'rgba(59, 130, 246, 0.3)'
+                            }}
                             onClick={(e) => {
                               e.preventDefault()
                               window.require('electron').shell.openExternal(result.data.html_link)
                             }}
                           >
-                            <span className="text-xs">View in Google Calendar</span>
+                            <span>View in Google Calendar</span>
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="group-hover:translate-x-0.5 transition-transform">
                               <line x1="5" y1="12" x2="19" y2="12"></line>
                               <polyline points="12 5 19 12 12 19"></polyline>

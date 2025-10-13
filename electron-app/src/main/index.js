@@ -822,6 +822,7 @@ function createLLMChatWindow() {
     llmChatWindow.webContents.openDevTools({ mode: 'detach' });
   });
 
+
   return llmChatWindow;
 }
 
@@ -2608,6 +2609,25 @@ ipcMain.handle('capture-screenshot-region', async (event, bounds) => {
   } catch (error) {
     console.error('Error capturing screenshot region:', error);
     return null;
+  }
+});
+
+// Handle file picker dialog
+ipcMain.handle('open-file-dialog', async (event) => {
+  try {
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: 'All Files', extensions: ['*'] },
+        { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] },
+        { name: 'Text Files', extensions: ['txt', 'md', 'json', 'js', 'jsx', 'ts', 'tsx', 'py', 'java', 'cpp', 'c', 'h'] },
+        { name: 'Documents', extensions: ['pdf', 'doc', 'docx'] }
+      ]
+    });
+    return result;
+  } catch (error) {
+    console.error('Error opening file dialog:', error);
+    return { canceled: true, filePaths: [] };
   }
 });
 
